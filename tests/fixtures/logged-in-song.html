@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ja">
+  <body>
+    <div id="user">
+      <a href="/new/player?id=123456">FixtureUser</a> /
+      <a class="notification-badge" href="/new/notifications">通知(5)</a> /
+      <a href="/logout">ログアウト</a>
+      <form class="client-view-switch" method="get" action="/new/client_view">
+        <input type="hidden" name="client_view_present" value="1">
+        <input type="hidden" name="next" value="/new/song?songmd5=b89279d026c9d40d0f5eedde2e25b920&amp;view=new">
+      </form>
+      <form class="language-switch" method="get" action="/new/lang">
+        <select name="lang"><option value="ja" selected>日本語</option></select>
+        <input type="hidden" name="next" value="/new/song?songmd5=b89279d026c9d40d0f5eedde2e25b920&amp;view=new">
+      </form>
+    </div>
+    <div id="box">
+      <h1>図書室のエルザ [FOX]</h1>
+      <h2>橘花音 かなえゆめ composed by nmk / Notes:キラ Illustration:かぜっと</h2>
+      <p class="muted">ranking_key: b89279d026c9d40d0f5eedde2e25b920 / hash: b89279d026c9d40d0f5eedde2e25b920 / <a href="/archive/raw?type=song&amp;id=175301">旧IR魚拓</a></p>
+    </div>
+  </body>
+</html>

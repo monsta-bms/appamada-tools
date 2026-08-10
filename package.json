@@ -1,0 +1,20 @@
+{
+  "name": "appamada-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tools for the 不放逸 BMS difficulty table",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test tests/bmsir-parser.test.js tests/levels.test.js",
+    "smoke": "node --test tests/dist-smoke.test.js",
+    "check": "npm test && npm run build && npm run smoke"
+  },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "jsdom": "^30.0.1"
+  }
+}

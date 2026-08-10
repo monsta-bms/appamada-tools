@@ -1,0 +1,14 @@
+// ==UserScript==
+// @name         不放逸 BMSIR申請
+// @namespace    https://github.com/monsta-bms/appamada-tools
+// @version      0.1.0
+// @description  BMSIRから不放逸への譜面申請を補助します
+// @match        https://bms-ir.org/new/song*
+// @match        https://www.bms-ir.org/new/song*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_addStyle
+// @run-at       document-idle
+// @noframes
+// @updateURL    https://raw.githubusercontent.com/monsta-bms/appamada-tools/main/dist/appamada_bmsir_submit.user.js
+// @downloadURL  https://raw.githubusercontent.com/monsta-bms/appamada-tools/main/dist/appamada_bmsir_submit.user.js
+// ==/UserScript==
