@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { JSDOM, VirtualConsole } from "jsdom";
@@ -10,6 +11,10 @@ const pageUrl =
 
 test("built Userscript metadata and bundle pass smoke checks", async () => {
   const source = await readFile(distUrl, "utf8");
+  assert.equal(
+    createHash("sha256").update(source).digest("hex"),
+    "60f2554ee805f61cbb1a61c14bc080fb01a8d90bf7e531929b668cebEE032aa9".toLowerCase(),
+  );
   assert.equal(source.startsWith("// ==UserScript=="), true);
   assert.match(source, /^\/\/ @version\s+0\.1\.0$/m);
   assert.match(source, /^\/\/ @run-at\s+document-idle$/m);

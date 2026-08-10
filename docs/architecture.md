@@ -1,6 +1,6 @@
 # Architecture
 
-将来の申請経路は次を予定しています。
+Phase 2のテスト申請経路は次の構成です。
 
 ```text
 BMSIR
@@ -11,13 +11,21 @@ Standalone Apps Script API
   ↓
 申請一覧
 
-管理者
-  ↓
-Spreadsheet bound Apps Script
-  ↓
-kkj
+テストSpreadsheetのkkj（read only）
+  ↓ lookup
+Standalone Apps Script API
+
+申請一覧
+  （Phase 2では保存のみ）
 ```
 
-Phase 1で実装するのはUserscript基盤、BMSIR parser、LEVEL定数、fixture testまでです。Apps Script API、Spreadsheet操作、申請送信、kkj反映は未実装です。
+UserscriptはBMSIR Cookieやsessionを取得せず、ページDOMから取得したログインユーザーと譜面情報だけを使用します。通信は`anonymous: true`の`GM_xmlhttpRequest`で行い、Google ContentServiceのredirect後にtextをJSONとして解釈します。
 
 parserはglobal `document` / `location`へ直接依存せず、`parseBmsirPage(document, pageUrl)`としてfixtureと実ページの両方から呼び出せます。URL、DOM、MD5三値をfail closedで検証し、原因は固定error codeで返します。
+
+Standalone Apps ScriptはテストSpreadsheet IDをScript Propertiesから取得します。submitはScriptLock内でA:S schema、request_id、rate limit、kkj状態を検査し、Google Sheets Advanced Serviceの`valueInputOption: RAW`で申請一覧へ保存します。
+
+公開`dist/appamada_bmsir_submit.user.js`はPhase 1安定版です。Phase 2はAPI URLをbuild時注入した`.local/appamada_bmsir_submit.test.user.js`だけを使用します。テストSpreadsheet、テストWeb App、本番環境をコード上で混在させません。
+
+公式反映経路（bound Apps Script、○、kkj更新、recovery）はPhase 3以降であり、Phase 2には含みません。
+新規譜面のBMSIR title/artistは申請一覧F/G列の初期値に留め、管理者による修正を許容します。Phase 3の○反映では反映時点のF/Gセル値を正として`kkj`へ使用します。

@@ -1,0 +1,14 @@
+// ==UserScript==
+// @name         不放逸 BMSIR申請 [Phase 2 Test]
+// @namespace    https://github.com/monsta-bms/appamada-tools
+// @version      0.2.0-test
+// @description  BMSIRから不放逸テスト申請一覧への譜面申請を補助します
+// @match        https://bms-ir.org/new/song*
+// @match        https://www.bms-ir.org/new/song*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_addStyle
+// @connect      script.google.com
+// @connect      script.googleusercontent.com
+// @run-at       document-idle
+// @noframes
+// ==/UserScript==
