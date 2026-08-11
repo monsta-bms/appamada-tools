@@ -9,8 +9,9 @@ BMS難易度表「不放逸」とBMSIRを連携するUserscriptの開発リポ�
 
 - Phase 1: BMSIR parser、難易度定数、fixture test、公開Userscript基盤
 - Phase 2: 右クリック投稿UI、lookup/submit client、Standalone Apps Script API、申請一覧へのRAW書込み
+- Phase 3: テストSpreadsheet向け管理者承認、kkj順序維持、Developer Metadata recovery
 
-Phase 2はテスト環境専用です。公式`kkj`への反映、○処理、行移動、recovery、onEditは実装していません。
+Phase 2/3はテスト環境専用です。Phase 3管理処理は`apps-script/admin`にありますが、本番Spreadsheet、本番Apps Script、公開`data_url`には導入しません。運用は[Phase 3 管理者承認](docs/phase3-admin.md)を参照してください。
 
 ## 開発
 
@@ -34,7 +35,9 @@ npm run build
 npm run smoke
 ```
 
-生成物は `dist/appamada_bmsir_submit.user.js` です。GitHub Raw URLからTampermonkeyまたはViolentmonkeyへインストールできます。
+通常の`npm run build`はgit管理外の`.local/appamada_bmsir_submit.public-check.user.js`へ生成し、`npm run smoke`で固定済み公開distとEOL正規化後の内容を比較します。これにより`npm run check`はtracked public distを変更しません。
+
+公開releaseを明示的に再生成する場合だけ`npm run build:public`を使用します。公開生成物は`dist/appamada_bmsir_submit.user.js`です。
 
 ## Phase 2テストUserscript
 

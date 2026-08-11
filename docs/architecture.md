@@ -16,7 +16,10 @@ Standalone Apps Script API
 Standalone Apps Script API
 
 申請一覧
-  （Phase 2では保存のみ）
+  ↓ 管理者がA列へ○
+bound Apps Script（Phase 3 / テスト環境）
+  ↓ change/new・順序検証・recovery
+テストSpreadsheetのkkj
 ```
 
 UserscriptはBMSIR Cookieやsessionを取得せず、ページDOMから取得したログインユーザーと譜面情報だけを使用します。通信は`anonymous: true`の`GM_xmlhttpRequest`で行い、Google ContentServiceのredirect後にtextをJSONとして解釈します。
@@ -27,5 +30,5 @@ Standalone Apps ScriptはテストSpreadsheet IDをScript Propertiesから取得
 
 公開`dist/appamada_bmsir_submit.user.js`はPhase 1安定版です。Phase 2はAPI URLをbuild時注入した`.local/appamada_bmsir_submit.test.user.js`だけを使用します。テストSpreadsheet、テストWeb App、本番環境をコード上で混在させません。
 
-公式反映経路（bound Apps Script、○、kkj更新、recovery）はPhase 3以降であり、Phase 2には含みません。
+管理者反映経路（bound Apps Script、○、kkj更新、recovery）はPhase 3としてテストSpreadsheetにのみ実装しています。公式表への本番導入はPhase 4まで行いません。
 新規譜面のBMSIR title/artistは申請一覧F/G列の初期値に留め、管理者による修正を許容します。Phase 3の○反映では反映時点のF/Gセル値を正として`kkj`へ使用します。
