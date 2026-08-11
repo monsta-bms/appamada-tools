@@ -30,3 +30,14 @@ bound管理処理:
 本番公開は、停止状態でのlookup、submit拒否、管理反映拒否、既存`doGet`維持を確認した後に行います。候補Userscriptでchange/newの実送信を確認し、管理者反映経路は本番コピーのdry-runで検証してからキルスイッチを有効化します。本番kkjへの架空反映は行いません。失敗時は有効化せず、直前backupと既存deploymentを保持したまま原因を調査します。
 
 Userscript Managerは低いversionへ自動downgradeしない場合があります。公開後の緊急停止版／安全版は、公開中のversionより高いversion（0.3.0に対して0.3.1など）で配布します。
+
+## Production release 0.3.0
+
+- GitHub Raw版のHTTP 200、version 0.3.0、production metadata、`@connect` 2件、production API接続、test marker／source mapなしを確認
+- GitHub Raw版をTampermonkeyへ更新し、実BMSIRからnew申請を1件送信。A空欄、状態「未処理」、`client_version=0.3.0`、BMSIR user/player ID、title、artist、MD5、level、request_idを確認
+- release smoke行はkkjへ反映せず削除し、申請一覧をA:S headerだけへ戻した
+- live lookupは登録済み／未登録の双方で成功し、submit受付有効時のvalidation応答を確認
+- `SUBMIT_ENABLED=true`、`ADMIN_APPLY_ENABLED=true`、installable trigger各1を最終確認
+- 公開後もdata_urlは11,984件、不正MD5 0、重複0、level block 29、分断0で、開始前raw SHA-256と一致
+
+本番での最初の○反映は、架空smokeではなく、管理者が内容を確認した最初の実申請に対して行います。
