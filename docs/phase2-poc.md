@@ -53,7 +53,17 @@ npm.cmd run smoke:test
 
 ## Browser/UserScript Manager manual test
 
-Google test Web Appはdeploy済みですが、以下の実機4環境は未実施です。自動DOM/UI testの成功を実機PASSの代用にはしません。
+2026-08-11にTampermonkey + 実BMSIRで次のUIを目視確認しました（ブラウザ種別は未記録）。
+
+- 曲名/artist右クリックメニュー表示
+- 難易度変更申請画面表示
+- 登録済譜面で新規申請拒否
+- 未登録譜面で新規申請画面表示
+- 未登録譜面で変更申請拒否
+- changeの↑↓および直接レベル選択UI
+- newのレベルグリッドUI
+
+実際の送信は実機未確認のため、実機での送信成功とは記録しません。下記4環境の完全な組合せ確認も未完了です。自動DOM/UI testの成功を未確認環境の実機PASSの代用にはしません。
 
 各環境で`.local/appamada_bmsir_submit.test.user.js`を一時インストールします。
 

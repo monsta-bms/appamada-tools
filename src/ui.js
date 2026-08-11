@@ -53,7 +53,7 @@ const STYLE = `
 .appamada-overlay{position:fixed;inset:0;z-index:12010;display:grid;place-items:center;padding:20px;background:#0008}
 .appamada-modal{box-sizing:border-box;width:min(680px,100%);max-height:90vh;overflow:auto;padding:20px;background:#fff;color:#222;border-radius:12px;box-shadow:0 14px 40px #0006}
 .appamada-modal-header{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #ddd}
-.appamada-modal-header h2{margin:0 0 12px;font-size:1.25rem}
+.appamada-modal-header h2{margin:0 0 12px;font-size:1.25rem;color:#222;font-weight:700;opacity:1;text-shadow:none}
 .appamada-close{padding:5px 10px;border:1px solid #888;border-radius:5px;background:#fff;cursor:pointer}
 .appamada-facts{display:grid;grid-template-columns:max-content 1fr;gap:5px 12px;margin:16px 0}
 .appamada-facts dt{font-weight:700}.appamada-facts dd{margin:0;overflow-wrap:anywhere}
