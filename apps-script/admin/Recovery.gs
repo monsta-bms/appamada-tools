@@ -1,14 +1,14 @@
 function positionRecoveredAdminChange_(masterSheet, metadataRow, targetLevel) {
   var rows = readAdminMasterRows_(masterSheet);
   var remaining = rows.map(function (row) { return row.slice(); });
-  var moved = remaining.splice(metadataRow - 1, 1)[0];
+  var moved = remaining.splice(metadataRow - 2, 1)[0];
   moved[0] = targetLevel;
   var insertion = AppamadaAdminLogic.insertionIndex(remaining, targetLevel);
   if (!insertion.ok) throwAdminError_(insertion.code, insertion.detail, "要確認");
   remaining.splice(insertion.index, 0, moved);
-  var finalAnalysis = AppamadaAdminLogic.analyzeTableOrder(remaining, 1);
+  var finalAnalysis = AppamadaAdminLogic.analyzeTableOrder(remaining, 2);
   if (!finalAnalysis.ok) throwAdminError_(finalAnalysis.code, finalAnalysis.detail, "要確認");
-  var finalRow = insertion.index + 1;
+  var finalRow = insertion.index + 2;
   moveAdminMasterRow_(masterSheet, metadataRow, finalRow);
   return finalRow;
 }

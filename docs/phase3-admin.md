@@ -39,6 +39,7 @@ level, title, artist, md5, ""
 ## 表順序
 
 Phase 3の順序は現在のkkj / 公開JSON実順序です。
+`kkj`の1行目は`level,title,artist,md5,comment`のヘッダーとして保持し、表順序・MD5監査、移動、挿入、復旧の対象は2行目以降です。処理結果の行番号は実際のSpreadsheet行番号で記録します。
 
 ```text
 0..9, 10-, 10, 10+, 11-, 11, 11+, 12-, 12, 12+,

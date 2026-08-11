@@ -6,20 +6,20 @@ function getAdminMasterSheet_(spreadsheet) {
 
 function readAdminMasterRows_(sheet) {
   var lastRow = sheet.getLastRow();
-  return lastRow < 1 ? [] : sheet.getRange(1, 1, lastRow, 5).getValues();
+  return lastRow < 2 ? [] : sheet.getRange(2, 1, lastRow - 1, 5).getValues();
 }
 
 function assertAdminTableOrder_(sheet) {
-  var analysis = AppamadaAdminLogic.analyzeTableOrder(readAdminMasterRows_(sheet), 1);
+  var analysis = AppamadaAdminLogic.analyzeTableOrder(readAdminMasterRows_(sheet), 2);
   if (!analysis.ok) throwAdminError_(analysis.code, analysis.detail, "要確認");
   return analysis;
 }
 
 function findAdminMasterRowsByMd5_(sheet, md5) {
   var lastRow = sheet.getLastRow();
-  if (lastRow < 1) return [];
+  if (lastRow < 2) return [];
   return sheet
-    .getRange(1, 4, lastRow, 1)
+    .getRange(2, 4, lastRow - 1, 1)
     .createTextFinder(md5)
     .matchEntireCell(true)
     .matchCase(false)
@@ -122,16 +122,16 @@ function moveAdminMasterRow_(sheet, sourceRow, finalRow) {
 
 function planAdminMasterMove_(sheet, sourceRow, targetLevel) {
   var rows = readAdminMasterRows_(sheet);
-  var plan = AppamadaAdminLogic.planMove(rows, sourceRow - 1, targetLevel);
+  var plan = AppamadaAdminLogic.planMove(rows, sourceRow - 2, targetLevel);
   if (!plan.ok) throwAdminError_(plan.code, plan.detail, "要確認");
-  return { finalRow: plan.finalIndex + 1, rows: plan.rows };
+  return { finalRow: plan.finalIndex + 2, rows: plan.rows };
 }
 
 function planAdminMasterInsertion_(sheet, targetLevel) {
   var rows = readAdminMasterRows_(sheet);
   var insertion = AppamadaAdminLogic.insertionIndex(rows, targetLevel);
   if (!insertion.ok) throwAdminError_(insertion.code, insertion.detail, "要確認");
-  return insertion.index + 1;
+  return insertion.index + 2;
 }
 
 function auditAdminMd5Duplicates_() {
@@ -142,8 +142,8 @@ function auditAdminMd5Duplicates_() {
   var duplicates = [];
   rows.forEach(function (row, index) {
     var md5 = String(row[3] || "").toLowerCase();
-    if (seen[md5]) duplicates.push({ md5: md5, rows: [seen[md5], index + 1] });
-    else seen[md5] = index + 1;
+    if (seen[md5]) duplicates.push({ md5: md5, rows: [seen[md5], index + 2] });
+    else seen[md5] = index + 2;
   });
   if (duplicates.length) throwAdminError_("CHART_DUPLICATED", JSON.stringify(duplicates), "要確認");
   return { ok: true, duplicateCount: 0, rowCount: rows.length };

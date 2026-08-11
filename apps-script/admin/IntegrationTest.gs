@@ -37,11 +37,12 @@ function phase3WriteValuesRaw_(spreadsheet, sheet, rangeA1, values) {
 
 function phase3SeedMaster_(spreadsheet, sheet) {
   sheet.clearContents();
+  sheet.getRange(1, 1, 1, 5).setValues([["level", "title", "artist", "md5", "comment"]]);
   var levels = ["0", "0", "9", "9", "10", "10", "10+", "11", "12-", "12", "12", "16", "16", "★★4?", "★★4?", "★★5?", "?"];
   var rows = levels.map(function (level, index) {
     return [level, "Phase3 Seed Title " + (index + 1), "Phase3 Seed Artist " + (index + 1), phase3Md5_(index + 1), index === 2 ? "2024.11.24 seed" : ""];
   });
-  var seedRange = sheet.getRange(1, 1, rows.length, 5);
+  var seedRange = sheet.getRange(2, 1, rows.length, 5);
   seedRange.setNumberFormat("@");
   seedRange.setValues(rows);
   SpreadsheetApp.flush();
