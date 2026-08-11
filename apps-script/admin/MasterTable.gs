@@ -42,19 +42,40 @@ function writeAdminMasterRowRaw_(spreadsheet, sheet, rowNumber, row) {
 }
 
 function insertAdminMasterBlankRow_(sheet, rowNumber) {
+  var filterSnapshot = captureAdminFilterForInsert_(sheet, rowNumber);
+  var filterRemoved = false;
+  var operationError = null;
   try {
+    if (filterSnapshot) {
+      filterSnapshot.filter.remove();
+      filterRemoved = true;
+    }
     if (rowNumber <= sheet.getMaxRows()) sheet.insertRowsBefore(rowNumber, 1);
     else sheet.insertRowsAfter(sheet.getMaxRows(), rowNumber - sheet.getMaxRows());
   } catch (error) {
-    throwAdminError_("GOOGLE_SERVICE_ERROR", "kkj blank row could not be inserted", "エラー");
+    operationError = error;
+  } finally {
+    if (filterRemoved) {
+      try {
+        restoreAdminFilter_(sheet, filterSnapshot);
+      } catch (filterRestoreError) {
+        if (!operationError) operationError = filterRestoreError;
+      }
+    }
+  }
+  if (operationError) {
+    throwAdminError_(
+      "GOOGLE_SERVICE_ERROR",
+      "kkj blank row could not be inserted: " + String(operationError.message || operationError),
+      "エラー",
+    );
   }
 }
 
-function captureAdminFilterForMove_(sheet, sourceRow, finalRow) {
+function captureAdminFilter_(sheet) {
   var filter = sheet.getFilter();
   if (!filter) return null;
   var range = filter.getRange();
-  if (!AppamadaAdminLogic.moveCrossesRow(sourceRow, finalRow, range.getRow())) return null;
   var criteria = [];
   for (var column = range.getColumn(); column <= range.getLastColumn(); column += 1) {
     var value = filter.getColumnFilterCriteria(column);
@@ -63,8 +84,22 @@ function captureAdminFilterForMove_(sheet, sourceRow, finalRow) {
   return {
     filter: filter,
     rangeA1: range.getA1Notation(),
+    lastRow: range.getLastRow(),
     criteria: criteria,
   };
+}
+
+function captureAdminFilterForInsert_(sheet, rowNumber) {
+  var snapshot = captureAdminFilter_(sheet);
+  return snapshot && rowNumber <= snapshot.lastRow ? snapshot : null;
+}
+
+function captureAdminFilterForMove_(sheet, sourceRow, finalRow) {
+  var snapshot = captureAdminFilter_(sheet);
+  if (!snapshot) return null;
+  var range = snapshot.filter.getRange();
+  if (!AppamadaAdminLogic.moveCrossesRow(sourceRow, finalRow, range.getRow())) return null;
+  return snapshot;
 }
 
 function restoreAdminFilter_(sheet, snapshot) {

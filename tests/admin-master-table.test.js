@@ -11,6 +11,21 @@ function row(level, number) {
   return [level, `Title ${number}`, `Artist ${number}`, md5(number), ""];
 }
 
+function columnName(column) {
+  var value = column;
+  var result = "";
+  while (value > 0) {
+    value -= 1;
+    result = String.fromCharCode(65 + (value % 26)) + result;
+    value = Math.floor(value / 26);
+  }
+  return result;
+}
+
+function columnNumber(name) {
+  return Array.from(name).reduce((value, character) => value * 26 + character.charCodeAt(0) - 64, 0);
+}
+
 class Range {
   constructor(sheet, startRow, startColumn, rowCount, columnCount) {
     this.sheet = sheet;
@@ -27,16 +42,73 @@ class Range {
       ),
     );
   }
+
+  getRow() { return this.startRow; }
+  getLastRow() { return this.startRow + this.rowCount - 1; }
+  getColumn() { return this.startColumn; }
+  getLastColumn() { return this.startColumn + this.columnCount - 1; }
+  getA1Notation() {
+    return `${columnName(this.startColumn)}${this.startRow}:${columnName(this.getLastColumn())}${this.getLastRow()}`;
+  }
+  createFilter() {
+    this.sheet.filter = new BasicFilter(this.sheet, this, new Map());
+    return this.sheet.filter;
+  }
+}
+
+class BasicFilter {
+  constructor(sheet, range, criteria) {
+    this.sheet = sheet;
+    this.range = range;
+    this.criteria = new Map(criteria);
+    this.removed = false;
+  }
+
+  getRange() { return this.range; }
+  getColumnFilterCriteria(column) { return this.criteria.get(column) ?? null; }
+  setColumnFilterCriteria(column, value) { this.criteria.set(column, value); }
+  remove() {
+    this.removed = true;
+    this.sheet.filter = null;
+  }
 }
 
 class Sheet {
   constructor(rows) {
     this.rows = rows.map((value) => [...value]);
+    this.maxRows = 17041;
+    this.filter = null;
+    this.insertions = [];
   }
 
   getLastRow() { return this.rows.length; }
+  getMaxRows() { return this.maxRows; }
+  getFilter() { return this.filter; }
   getRange(startRow, startColumn, rowCount = 1, columnCount = 1) {
+    if (typeof startRow === "string") {
+      const match = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(startRow);
+      if (!match) throw new Error(`Unsupported A1 range: ${startRow}`);
+      const parsedStartColumn = columnNumber(match[1]);
+      const parsedStartRow = Number(match[2]);
+      const parsedLastColumn = columnNumber(match[3]);
+      const parsedLastRow = Number(match[4]);
+      return new Range(
+        this,
+        parsedStartRow,
+        parsedStartColumn,
+        parsedLastRow - parsedStartRow + 1,
+        parsedLastColumn - parsedStartColumn + 1,
+      );
+    }
     return new Range(this, startRow, startColumn, rowCount, columnCount);
+  }
+  insertRowsBefore(rowNumber, count) {
+    this.insertions.push({ type: "before", rowNumber, count });
+    this.maxRows += count;
+  }
+  insertRowsAfter(rowNumber, count) {
+    this.insertions.push({ type: "after", rowNumber, count });
+    this.maxRows += count;
   }
 }
 
@@ -127,4 +199,26 @@ test("recovery maps metadata rows through the production header offset", async (
   const sheet = {};
   assert.equal(context.positionRecoveredAdminChange_(sheet, 2, "10"), 4);
   assert.deepEqual(moves, [{ sheet, sourceRow: 2, finalRow: 4 }]);
+});
+
+test("new row insertion restores the exact basic filter range and criteria", async () => {
+  const sheet = new Sheet([
+    ["level", "title", "artist", "md5", "comment"],
+    row("0", 1),
+  ]);
+  const hiddenTitles = Object.freeze({ hiddenValues: ["Hidden Title"] });
+  const originalFilter = new BasicFilter(
+    sheet,
+    sheet.getRange(1, 1, 14954, 5),
+    new Map([[2, hiddenTitles]]),
+  );
+  sheet.filter = originalFilter;
+  const context = await loadMasterTable(sheet);
+
+  context.insertAdminMasterBlankRow_(sheet, 3);
+
+  assert.equal(originalFilter.removed, true);
+  assert.deepEqual(sheet.insertions, [{ type: "before", rowNumber: 3, count: 1 }]);
+  assert.equal(sheet.filter.getRange().getA1Notation(), "A1:E14954");
+  assert.equal(sheet.filter.getColumnFilterCriteria(2), hiddenTitles);
 });

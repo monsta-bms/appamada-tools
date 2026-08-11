@@ -35,6 +35,7 @@ level, title, artist, md5, ""
 ```
 
 `=`, `+`, `-`, `@`で始まる文字列も式として評価しません。対象level blockがなければ現在の公開順で次のblock直前へ挿入します。同じMD5が先に追加済みなら`CHART_ALREADY_EXISTS` / `要確認`です。
+新規行を既存basic filter範囲内へ挿入する場合は、filter範囲と列条件を退避し、挿入後も元の範囲・条件を復元します。
 
 ## 表順序
 
