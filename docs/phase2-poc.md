@@ -32,21 +32,28 @@ npm.cmd run smoke:test
 
 ## Google integration checklist
 
-2026-08-11時点ではclaspがGoogle未認証で、テスト用Spreadsheet IDも未指定です。そのためGoogle project作成、test Web App deploy、実Spreadsheet書込み、実API latency測定は未実施です。本番Spreadsheet / Apps Scriptを代用していません。
+2026-08-11にテスト用Standalone Apps Script、テストSpreadsheet、匿名test Web Appを用いて実測しました。IDとWeb App URLはgit管理しません。
 
-テストWeb AppとテストSpreadsheetが用意できたら、次を実測します。
+- lookup: registered / missing / malformedを確認
+- change: success / same level / missing chartを確認
+- new: successとBMSIR由来title/artist保存を確認
+- request_id: 同一payloadのdedupと異なるpayloadのconflictを確認
+- RAW: `=1+1`、`+84`、`=HYPERLINK(...)`が実Spreadsheetで文字列のまま保存されることを確認
+- rate: `USER_LIMIT=3`で3件成功、冪等再送成功、4件目`RATE_LIMITED`を確認
+- rate override削除後、4件目がdefault制限で成功することを確認
+- lookup cold（未cacheの異なるmissing MD5 10件）: p50 `1843.4 ms` / p95 `2640.9 ms`
+- lookup warm（同一missing MD5をprewarm後10件）: p50 `930.9 ms` / p95 `1058.2 ms`
+- 実Web App URLを注入したtest Userscript build / smoke: PASS
+- 本番Spreadsheet / Apps Scriptは代用せず、テストコピーだけを使用
 
-- lookup: registered / missing / malformed
-- change: success / same level / missing chart
-- new: success / existing chart / title+artist保存
-- common: dedup / conflict / long comment / invalid level / invalid IR URL
-- RAW: `=1+1`, `+84`, `=HYPERLINK(...)`がformulaにならない
-- rate: test override `USER_LIMIT=3`、試験後削除
-- lookup latency: same MD5 cold/warm各10回以上、p50/p95
+残る確認項目:
+
+- long comment / invalid level / invalid IR URLは自動testで確認済み。実Web Appでは未送信
+- Chrome / Firefox × Tampermonkey / Violentmonkeyの実機UI確認
 
 ## Browser/UserScript Manager manual test
 
-Google test Web Appが未deployのため、以下の実機4環境は未実施です。自動DOM/UI testの成功を実機PASSの代用にはしません。
+Google test Web Appはdeploy済みですが、以下の実機4環境は未実施です。自動DOM/UI testの成功を実機PASSの代用にはしません。
 
 各環境で`.local/appamada_bmsir_submit.test.user.js`を一時インストールします。
 

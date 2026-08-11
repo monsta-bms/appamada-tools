@@ -5,6 +5,9 @@ import { JSDOM, VirtualConsole } from "jsdom";
 
 const distUrl = new URL("../.local/appamada_bmsir_submit.test.user.js", import.meta.url);
 const fixtureUrl = new URL("./fixtures/logged-in-song.html", import.meta.url);
+const expectedApiUrl =
+  process.env.APPAMADA_API_URL ??
+  "https://script.google.com/macros/s/test-deployment/exec";
 const pageUrl =
   "https://bms-ir.org/new/song?songmd5=b89279d026c9d40d0f5eedde2e25b920&view=new";
 
@@ -15,7 +18,7 @@ test("Phase 2 test bundle has isolated metadata and starts without a request", a
   assert.match(source, /^\/\/ @connect\s+script\.google\.com$/m);
   assert.match(source, /^\/\/ @connect\s+script\.googleusercontent\.com$/m);
   assert.doesNotMatch(source, /@updateURL|@downloadURL/);
-  assert.match(source, /https:\/\/script\.google\.com\/macros\/s\/test-deployment\/exec/);
+  assert.equal(source.includes(expectedApiUrl), true);
   assert.doesNotThrow(() => new Function(source));
 
   const virtualConsole = new VirtualConsole();
