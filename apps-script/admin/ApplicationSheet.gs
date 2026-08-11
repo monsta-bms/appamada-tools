@@ -9,6 +9,30 @@ function getAdminApplicationSheet_(spreadsheet) {
   return sheet;
 }
 
+function setupAdminApplicationSheet() {
+  var spreadsheet = getAdminSpreadsheet_();
+  var sheet = spreadsheet.getSheetByName(ADMIN_CONFIG.applicationSheetName);
+  var created = false;
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(ADMIN_CONFIG.applicationSheetName);
+    created = true;
+  }
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, ADMIN_APPLICATION_HEADERS.length).setValues([
+      ADMIN_APPLICATION_HEADERS.slice(),
+    ]);
+  } else {
+    getAdminApplicationSheet_(spreadsheet);
+  }
+  sheet.setFrozenRows(1);
+  return {
+    ok: true,
+    created: created,
+    sheet_name: sheet.getName(),
+    columns: ADMIN_APPLICATION_HEADERS.length,
+  };
+}
+
 function readAdminApplication_(sheet, rowNumber) {
   if (rowNumber < 2 || rowNumber > sheet.getLastRow()) {
     throwAdminError_("BAD_REQUEST", "Application row is outside the sheet", "要確認");

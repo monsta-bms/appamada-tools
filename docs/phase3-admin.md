@@ -89,7 +89,7 @@ Phase 3の順序は現在のkkj / 公開JSON実順序です。
 - レベル順序を検査
 - Trigger状態を確認
 
-`setupAdminTriggers()`はinstallable onEditと15分triggerを、同handlerの重複がない場合だけ作ります。`setupAdminSheetValidation()`は申請一覧A列を空欄/○運用に設定します。
+`setupAdminApplicationSheet()`は「申請一覧」がなければA:Sの19列schemaで作成し、存在する場合はheader完全一致を確認します。既存データや不一致schemaを上書きしません。`setupAdminTriggers()`はinstallable onEditと15分triggerを、同handlerの重複がない場合だけ作ります。`setupAdminSheetValidation()`は申請一覧A列を空欄/○運用に設定します。
 
 ## 管理者手順
 
