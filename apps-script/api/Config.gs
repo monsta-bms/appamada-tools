@@ -45,6 +45,10 @@ function positiveIntegerProperty_(properties, name, fallback) {
   return Number(raw);
 }
 
+function isSubmitEnabled_() {
+  return PropertiesService.getScriptProperties().getProperty("SUBMIT_ENABLED") === "true";
+}
+
 function getAppamadaConfig_() {
   var properties = PropertiesService.getScriptProperties();
   var spreadsheetId = String(properties.getProperty("SPREADSHEET_ID") || "").trim();

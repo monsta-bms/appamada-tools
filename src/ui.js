@@ -13,6 +13,7 @@ const ERROR_MESSAGES = Object.freeze({
   API_TIMEOUT: "通信がタイムアウトしました。時間を置いて再度お試しください。",
   API_INVALID_RESPONSE: "サーバーから正しい応答を取得できませんでした。",
   API_NOT_CONFIGURED: "テストAPIが設定されていません。",
+  SUBMISSIONS_DISABLED: "現在、不放逸への申請受付を一時停止しています。",
   BAD_REQUEST: "送信内容を確認できませんでした。",
   APPLICATION_TYPE_INVALID: "申請種別が正しくありません。",
   LOGIN_NAME_MISSING: "BMSIRのログインユーザー名を取得できませんでした。",

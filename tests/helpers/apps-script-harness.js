@@ -184,7 +184,11 @@ export async function createAppsScriptHarness({
     : null;
   const spreadsheet = new FakeSpreadsheet([kkj, ...(application ? [application] : [])]);
   const cache = new FakeCache();
-  const scriptProperties = new Map(Object.entries({ SPREADSHEET_ID: "test-spreadsheet", ...properties }));
+  const scriptProperties = new Map(Object.entries({
+    SPREADSHEET_ID: "test-spreadsheet",
+    SUBMIT_ENABLED: "true",
+    ...properties,
+  }));
   const rawWrites = [];
   const logs = [];
   const lockState = { available: lockAvailable, released: false };

@@ -98,6 +98,9 @@ function recoverOneAdminMetadata_(spreadsheet, applicationSheet, masterSheet, me
 }
 
 function recoverInterruptedTransactions() {
+  if (!isAdminApplyEnabled_()) {
+    return { recovered: 0, cleaned: 0, failed: 0, ignored: 0, disabled: true };
+  }
   var spreadsheet = getAdminSpreadsheet_();
   var applicationSheet = getAdminApplicationSheet_(spreadsheet);
   var masterSheet = getAdminMasterSheet_(spreadsheet);
@@ -143,6 +146,7 @@ function recoverInterruptedTransactions() {
 }
 
 function retryTemporaryAdminErrors() {
+  if (!isAdminApplyEnabled_()) return { retried: 0, exhausted: 0, disabled: true };
   var spreadsheet = getAdminSpreadsheet_();
   var sheet = getAdminApplicationSheet_(spreadsheet);
   var lastRow = sheet.getLastRow();
@@ -173,6 +177,13 @@ function retryTemporaryAdminErrors() {
 }
 
 function runScheduledRecovery() {
+  if (!isAdminApplyEnabled_()) {
+    return {
+      disabled: true,
+      metadata: { recovered: 0, cleaned: 0, failed: 0, ignored: 0, disabled: true },
+      retry: { retried: 0, exhausted: 0, disabled: true },
+    };
+  }
   return {
     metadata: recoverInterruptedTransactions(),
     retry: retryTemporaryAdminErrors(),

@@ -1,4 +1,5 @@
 function processAdminApplicationRow_(rowNumber, options) {
+  if (!isAdminApplyEnabled_()) return adminApplyDisabledResult_();
   var settings = options || {};
   var spreadsheet = getAdminSpreadsheet_();
   var applicationSheet = getAdminApplicationSheet_(spreadsheet);
@@ -50,6 +51,7 @@ function processAdminApplicationRow_(rowNumber, options) {
 }
 
 function handleAdminEdit(e) {
+  if (!isAdminApplyEnabled_()) return adminApplyDisabledResult_();
   if (!e || !e.range) return;
   var range = e.range;
   var sheet = range.getSheet();

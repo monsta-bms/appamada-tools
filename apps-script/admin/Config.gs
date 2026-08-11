@@ -50,3 +50,11 @@ function maybeInjectAdminFault_(point, requestId) {
   var value = PropertiesService.getScriptProperties().getProperty("TEST_" + point);
   if (value === "true" || value === requestId) throw new AdminInjectedFault(point);
 }
+
+function isAdminApplyEnabled_() {
+  return PropertiesService.getScriptProperties().getProperty("ADMIN_APPLY_ENABLED") === "true";
+}
+
+function adminApplyDisabledResult_() {
+  return { ok: false, disabled: true, code: "ADMIN_APPLY_DISABLED" };
+}

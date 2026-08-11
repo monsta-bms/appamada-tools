@@ -1,4 +1,7 @@
 function submitApplication_(rawPayload) {
+  if (!isSubmitEnabled_()) {
+    throwApiError_("SUBMISSIONS_DISABLED", "Application submissions are disabled");
+  }
   var payload = validatePayload_(rawPayload);
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) {

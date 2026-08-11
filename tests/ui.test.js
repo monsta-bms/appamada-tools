@@ -4,7 +4,7 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 
 import { parseBmsirPage } from "../src/bmsir-parser.js";
-import { installSubmissionUi } from "../src/ui.js";
+import { errorMessageFor, installSubmissionUi } from "../src/ui.js";
 
 const MD5 = "b89279d026c9d40d0f5eedde2e25b920";
 const PAGE_URL = `https://bms-ir.org/new/song?songmd5=${MD5}&view=new`;
@@ -50,6 +50,13 @@ async function openWorkflow(state, action) {
   state.document.querySelector(`.appamada-menu [data-action="${action}"]`).click();
   await flush();
 }
+
+test("submission kill switch has the required Japanese message", () => {
+  assert.equal(
+    errorMessageFor("SUBMISSIONS_DISABLED"),
+    "現在、不放逸への申請受付を一時停止しています。",
+  );
+});
 
 test("title and artist right-click open the custom menu", () => {
   for (const selector of ["#box > h1", "#box > h2"]) {

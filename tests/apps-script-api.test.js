@@ -78,6 +78,19 @@ test("lookup distinguishes registered and missing MD5 values", async () => {
   });
 });
 
+test("submit defaults closed while lookup remains available", async () => {
+  for (const setting of [null, "false"]) {
+    const harness = await createAppsScriptHarness({
+      kkjRows: [KJJ_ROW],
+      properties: { SUBMIT_ENABLED: setting },
+    });
+    assert.equal(harness.get({ action: "lookup", md5: EXISTING_MD5 }).ok, true);
+    assert.equal(harness.post(changePayload()).error.code, "SUBMISSIONS_DISABLED");
+    assert.equal(harness.applications().length, 0);
+    assert.equal(harness.lockState.released, false);
+  }
+});
+
 test("lookup rejects malformed MD5 and unknown query shapes", async () => {
   const harness = await createAppsScriptHarness({ kkjRows: [KJJ_ROW] });
   assert.equal(harness.get({ action: "lookup", md5: "bad" }).error.code, "MD5_INVALID");

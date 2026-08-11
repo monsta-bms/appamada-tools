@@ -93,6 +93,12 @@ Phase 3の順序は現在のkkj / 公開JSON実順序です。
 
 `setupAdminApplicationSheet()`は「申請一覧」がなければA:Sの19列schemaで作成し、存在する場合はheader完全一致を確認します。既存データや不一致schemaを上書きしません。`setupAdminTriggers()`はinstallable onEditと15分triggerを、同handlerの重複がない場合だけ作ります。`setupAdminSheetValidation()`は申請一覧A列を空欄/○運用に設定します。
 
+## 管理反映キルスイッチ
+
+Script Property `ADMIN_APPLY_ENABLED`が文字列`true`のときだけ、○のonEdit、選択行再処理、一時エラー再処理、中断トランザクション回収、定期回収が`kkj`や申請一覧を更新します。未設定、`false`、その他の値では安全側に停止し、検査メニューは引き続き利用できます。本番導入直後は`false`のまま構造・trigger・権限を確認し、有効化は最終確認後に行います。
+
+緊急停止時は`ADMIN_APPLY_ENABLED=false`へ変更します。停止中にA列へ○が入力されても自動反映されないため、再開後は対象行を選択して「不放逸管理」→「選択行を再処理」を使用します。
+
 ## 管理者手順
 
 新規申請:

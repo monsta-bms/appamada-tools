@@ -20,6 +20,9 @@ Apps Script sourceは`apps-script/api`にあります。
 必須:
 
 - `SPREADSHEET_ID`: テストSpreadsheet ID
+- `SUBMIT_ENABLED`: 申請受付中だけ文字列`true`。未設定、`false`、その他の値ではsubmitを停止する
+
+`SUBMIT_ENABLED`が停止状態でもGET lookupは利用できます。POSTは保存・lock取得より前に`SUBMISSIONS_DISABLED`を返します。Userscriptは「現在、不放逸への申請受付を一時停止しています。」と表示します。
 
 任意のテストoverride:
 
@@ -64,15 +67,16 @@ bodyはJSONです。`change`はtitle/artist/current levelをclientから受け�
 
 処理順序:
 
-1. payload validation
-2. `ScriptLock.tryLock(3000)`
-3. A:S schema検査
-4. P列request_id完全一致
-5. 同一payloadなら`deduplicated: true`
-6. rate limit
-7. cacheを使わない`kkj`再確認
-8. 申請行作成
-9. Sheets Advanced Service `valueInputOption: RAW`でA:Sへ保存
+1. `SUBMIT_ENABLED`確認
+2. payload validation
+3. `ScriptLock.tryLock(3000)`
+4. A:S schema検査
+5. P列request_id完全一致
+6. 同一payloadなら`deduplicated: true`
+7. rate limit
+8. cacheを使わない`kkj`再確認
+9. 申請行作成
+10. Sheets Advanced Service `valueInputOption: RAW`でA:Sへ保存
 
 同じrequest_idと異なるpayloadは`REQUEST_ID_CONFLICT`です。冪等再送はrate countより前に返します。
 
@@ -98,4 +102,4 @@ bodyはJSONです。`change`はtitle/artist/current levelをclientから受け�
 `LEVEL_REQUIRED`, `LEVEL_INVALID`, `SAME_AS_CURRENT`, `COMMENT_TOO_LONG`,
 `CLIENT_VERSION_INVALID`, `REQUEST_ID_INVALID`, `REQUEST_ID_CONFLICT`,
 `RATE_LIMITED`, `LOCK_TIMEOUT`, `SHEET_NOT_FOUND`, `SHEET_SCHEMA_INVALID`,
-`WRITE_FAILED`, `INTERNAL_ERROR`。
+`WRITE_FAILED`, `SUBMISSIONS_DISABLED`, `INTERNAL_ERROR`。

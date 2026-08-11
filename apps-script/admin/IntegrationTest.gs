@@ -142,6 +142,8 @@ function runPhase3IntegrationSuite() {
   phase3BackupSheets_(spreadsheet);
   var results = [];
   var properties = PropertiesService.getScriptProperties();
+  var previousAdminApplyEnabled = properties.getProperty("ADMIN_APPLY_ENABLED");
+  properties.setProperty("ADMIN_APPLY_ENABLED", "true");
   try {
     var master = getAdminMasterSheet_(spreadsheet);
     var applications = getAdminApplicationSheet_(spreadsheet);
@@ -319,6 +321,8 @@ function runPhase3IntegrationSuite() {
     ["TEST_FAIL_AFTER_MASTER_WRITE", "TEST_FAIL_AFTER_APPLICATION_UPDATE", "TEST_FAIL_AFTER_BLANK_INSERT"].forEach(function (name) {
       properties.deleteProperty(name);
     });
+    if (previousAdminApplyEnabled === null) properties.deleteProperty("ADMIN_APPLY_ENABLED");
+    else properties.setProperty("ADMIN_APPLY_ENABLED", previousAdminApplyEnabled);
     restorePhase3IntegrationBackup();
   }
 }

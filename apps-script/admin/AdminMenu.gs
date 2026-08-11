@@ -13,6 +13,10 @@ function onOpen() {
 }
 
 function reprocessSelectedAdminRows() {
+  if (!isAdminApplyEnabled_()) {
+    SpreadsheetApp.getUi().alert("管理反映は現在停止中です。");
+    return { processed: 0, disabled: true };
+  }
   var spreadsheet = getAdminSpreadsheet_();
   var sheet = spreadsheet.getActiveSheet();
   if (sheet.getName() !== ADMIN_CONFIG.applicationSheetName) {
@@ -44,6 +48,10 @@ function reprocessSelectedAdminRows() {
 
 function retryTemporaryAdminErrorsFromMenu() {
   var result = retryTemporaryAdminErrors();
+  if (result.disabled) {
+    SpreadsheetApp.getUi().alert("管理反映は現在停止中です。");
+    return result;
+  }
   SpreadsheetApp.getUi().alert(
     "一時エラー再処理: " + result.retried + "行 / 上限到達: " + result.exhausted + "行",
   );
@@ -67,6 +75,10 @@ function inspectApprovedPendingAdminRows() {
 
 function recoverInterruptedTransactionsFromMenu() {
   var result = recoverInterruptedTransactions();
+  if (result.disabled) {
+    SpreadsheetApp.getUi().alert("管理反映は現在停止中です。");
+    return result;
+  }
   SpreadsheetApp.getUi().alert(
     "回収: " + result.recovered + " / metadata掃除: " + result.cleaned +
     " / 要確認: " + result.failed + " / 無視: " + result.ignored,
