@@ -52,6 +52,7 @@ function readAdminApplication_(sheet, rowNumber) {
       md5: String(row[7]).toLowerCase(),
       originalLevel: String(row[8]),
       targetLevel: String(row[9]),
+      memo: String(row[14]),
       state: String(row[12]),
       requestId: String(row[15]),
       retryCount: Number(row[18] || 0),
@@ -103,6 +104,7 @@ function finalizeAdminApplication_(spreadsheet, sheet, rowNumber, memo) {
 }
 
 function markAdminApplicationFailure_(spreadsheet, sheet, rowNumber, error) {
+  var preserveDeletePlan = Boolean(error && error.preserveDeletePlan);
   var normalized = error instanceof AdminApplyError
     ? error
     : new AdminApplyError(
@@ -112,7 +114,7 @@ function markAdminApplicationFailure_(spreadsheet, sheet, rowNumber, error) {
     );
   return updateAdminApplicationOutcome_(spreadsheet, sheet, rowNumber, {
     state: normalized.state,
-    memo: normalized.message,
+    memo: preserveDeletePlan ? undefined : normalized.message,
     errorCode: normalized.code,
   });
 }

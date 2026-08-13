@@ -72,6 +72,21 @@ function insertAdminMasterBlankRow_(sheet, rowNumber) {
   }
 }
 
+function deleteAdminMasterRow_(sheet, rowNumber) {
+  if (rowNumber < 2 || rowNumber > sheet.getLastRow()) {
+    throwAdminError_("CHART_NOT_FOUND", "kkj delete target is outside the data rows", "要確認");
+  }
+  try {
+    sheet.deleteRow(rowNumber);
+  } catch (error) {
+    throwAdminError_(
+      "GOOGLE_SERVICE_ERROR",
+      "kkj row could not be deleted: " + String(error.message || error),
+      "エラー",
+    );
+  }
+}
+
 function captureAdminFilter_(sheet) {
   var filter = sheet.getFilter();
   if (!filter) return null;

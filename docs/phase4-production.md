@@ -41,3 +41,11 @@ Userscript Managerは低いversionへ自動downgradeしない場合がありま�
 - 公開後もdata_urlは11,984件、不正MD5 0、重複0、level block 29、分断0で、開始前raw SHA-256と一致
 
 本番での最初の○反映は、架空smokeではなく、管理者が内容を確認した最初の実申請に対して行います。
+
+## Production release 0.4.0
+
+- 特殊難易度`隔離`をUserscript、投稿API、管理反映の共通level定義へ追加
+- Userscriptへ`削除申請(難易度が☸0未満)`を追加。削除申請は難易度変更と区別し、申請一覧の種別を`delete`、難易度案を`削除`として保存
+- 管理者が削除申請のA列へ`○`を入力した場合、MD5一意性と投稿時現難易度の一致を再確認してからkkjの該当行を削除
+- 削除前に申請行へ復旧マーカーをRAW保存し、削除後の中断はscheduled recoveryで反映済みへ回収
+- 緊急停止時は従来どおり`SUBMIT_ENABLED=false`および`ADMIN_APPLY_ENABLED=false`を使用

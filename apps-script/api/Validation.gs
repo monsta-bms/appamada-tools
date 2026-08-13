@@ -67,7 +67,7 @@ function validatePayload_(payload) {
   }
 
   var applicationType = payload.application_type;
-  if (applicationType !== "change" && applicationType !== "new") {
+  if (applicationType !== "change" && applicationType !== "new" && applicationType !== "delete") {
     throwApiError_("APPLICATION_TYPE_INVALID", "application_type is invalid");
   }
 
@@ -98,7 +98,10 @@ function validatePayload_(payload) {
 
   var proposedLevel = String(payload.proposed_level === undefined ? "" : payload.proposed_level);
   if (!proposedLevel) throwApiError_("LEVEL_REQUIRED", "proposed_level is required");
-  if (APPAMADA_ALLOWED_LEVELS.indexOf(proposedLevel) === -1) {
+  if (applicationType === "delete" && proposedLevel !== "削除") {
+    throwApiError_("LEVEL_INVALID", "delete proposed_level must be 削除");
+  }
+  if (applicationType !== "delete" && APPAMADA_ALLOWED_LEVELS.indexOf(proposedLevel) === -1) {
     throwApiError_("LEVEL_INVALID", "proposed_level is invalid");
   }
 

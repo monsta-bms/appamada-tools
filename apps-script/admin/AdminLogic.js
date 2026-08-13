@@ -5,7 +5,7 @@ var AppamadaAdminLogic = (function () {
     "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
     "10-", "10", "10+", "11-", "11", "11+", "12-", "12", "12+",
     "13", "13+", "14", "15", "16",
-    "★★4?", "★★5?", "★★6?", "★★7?", "?",
+    "★★4?", "★★5?", "★★6?", "★★7?", "?", "隔離",
   ]);
   var MD5_PATTERN = /^[0-9a-f]{32}$/i;
   var UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -178,17 +178,27 @@ var AppamadaAdminLogic = (function () {
     if (!canProcessState(record.state, allowError)) {
       return fail("STATE_NOT_PROCESSABLE", "state is not processable: " + text(record.state));
     }
-    if (record.applicationType !== "change" && record.applicationType !== "new") {
+    if (
+      record.applicationType !== "change" &&
+      record.applicationType !== "new" &&
+      record.applicationType !== "delete"
+    ) {
       return fail("APPLICATION_TYPE_INVALID", "application type is invalid");
     }
     if (!MD5_PATTERN.test(text(record.md5))) return fail("MD5_INVALID", "md5 is invalid");
     if (!UUID_PATTERN.test(text(record.requestId))) {
       return fail("REQUEST_ID_INVALID", "request_id is invalid");
     }
-    if (PUBLISH_LEVEL_ORDER.indexOf(text(record.targetLevel)) === -1) {
+    if (record.applicationType === "delete") {
+      if (text(record.targetLevel) !== "削除") {
+        return fail("LEVEL_INVALID", "delete target must be 削除");
+      }
+      if (PUBLISH_LEVEL_ORDER.indexOf(text(record.originalLevel)) === -1) {
+        return fail("LEVEL_INVALID", "original level is invalid");
+      }
+    } else if (PUBLISH_LEVEL_ORDER.indexOf(text(record.targetLevel)) === -1) {
       return fail("LEVEL_INVALID", "target level is invalid");
-    }
-    if (record.applicationType === "change") {
+    } else if (record.applicationType === "change") {
       if (PUBLISH_LEVEL_ORDER.indexOf(text(record.originalLevel)) === -1) {
         return fail("LEVEL_INVALID", "original level is invalid");
       }

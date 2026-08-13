@@ -79,6 +79,7 @@ class Sheet {
     this.maxRows = 17041;
     this.filter = null;
     this.insertions = [];
+    this.deletions = [];
   }
 
   getLastRow() { return this.rows.length; }
@@ -109,6 +110,15 @@ class Sheet {
   insertRowsAfter(rowNumber, count) {
     this.insertions.push({ type: "after", rowNumber, count });
     this.maxRows += count;
+  }
+  deleteRow(rowNumber) {
+    this.deletions.push(rowNumber);
+    if (this.filter) {
+      const range = this.filter.range;
+      if (rowNumber >= range.startRow && rowNumber <= range.getLastRow()) range.rowCount -= 1;
+    }
+    this.rows.splice(rowNumber - 1, 1);
+    this.maxRows -= 1;
   }
 }
 
@@ -221,4 +231,28 @@ test("new row insertion restores the exact basic filter range and criteria", asy
   assert.deepEqual(sheet.insertions, [{ type: "before", rowNumber: 3, count: 1 }]);
   assert.equal(sheet.filter.getRange().getA1Notation(), "A1:E14954");
   assert.equal(sheet.filter.getColumnFilterCriteria(2), hiddenTitles);
+});
+
+test("delete row preserves filter criteria and shrinks a covering range", async () => {
+  const sheet = new Sheet([
+    ["level", "title", "artist", "md5", "comment"],
+    row("0", 1),
+    row("1", 2),
+  ]);
+  const hiddenTitles = Object.freeze({ hiddenValues: ["Hidden Title"] });
+  const originalFilter = new BasicFilter(
+    sheet,
+    sheet.getRange(1, 1, 3, 5),
+    new Map([[2, hiddenTitles]]),
+  );
+  sheet.filter = originalFilter;
+  const context = await loadMasterTable(sheet);
+
+  context.deleteAdminMasterRow_(sheet, 2);
+
+  assert.equal(originalFilter.removed, false);
+  assert.deepEqual(sheet.deletions, [2]);
+  assert.equal(sheet.filter.getRange().getA1Notation(), "A1:E2");
+  assert.equal(sheet.filter.getColumnFilterCriteria(2), hiddenTitles);
+  assert.deepEqual(sheet.rows.map((value) => value[0]), ["level", "1"]);
 });

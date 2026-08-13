@@ -44,6 +44,16 @@ function newPayload(overrides = {}) {
   };
 }
 
+function deletePayload(overrides = {}) {
+  return {
+    ...changePayload(),
+    application_type: "delete",
+    proposed_level: "削除",
+    comment: "☸0未満のため削除希望",
+    ...overrides,
+  };
+}
+
 function uniqueUuid(number) {
   return `00000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
 }
@@ -136,6 +146,25 @@ test("change rejects unsupported current levels", async () => {
     kkjRows: [["hst1", "Title", "Artist", EXISTING_MD5, ""]],
   });
   assert.equal(harness.post(changePayload()).error.code, "CURRENT_LEVEL_UNSUPPORTED");
+});
+
+test("delete stores server-owned fields and the fixed delete marker", async () => {
+  const harness = await createAppsScriptHarness({ kkjRows: [KJJ_ROW] });
+  assert.equal(harness.post(deletePayload()).ok, true);
+  const row = harness.applications()[0];
+  assert.deepEqual(row.slice(1, 11), [
+    "delete", "2026/08/11 12:34:56", "FixtureUser", "123456",
+    "Server Title", "Server Artist", EXISTING_MD5, "10", "削除", "☸0未満のため削除希望",
+  ]);
+});
+
+test("delete rejects missing, duplicated, and forged delete targets", async () => {
+  const missing = await createAppsScriptHarness({ kkjRows: [] });
+  assert.equal(missing.post(deletePayload()).error.code, "CHART_NOT_FOUND");
+  const duplicated = await createAppsScriptHarness({ kkjRows: [KJJ_ROW, KJJ_ROW] });
+  assert.equal(duplicated.post(deletePayload()).error.code, "CHART_DUPLICATED");
+  const forged = await createAppsScriptHarness({ kkjRows: [KJJ_ROW] });
+  assert.equal(forged.post(deletePayload({ proposed_level: "0" })).error.code, "LEVEL_INVALID");
 });
 
 test("normal new stores parser title and artist", async () => {

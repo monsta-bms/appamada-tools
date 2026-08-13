@@ -24,6 +24,7 @@ test("step and special membership is separated", () => {
   assert.equal(isStepLevel("10+"), true);
   assert.equal(isStepLevel("?"), false);
   assert.equal(isSpecialLevel("★★4?"), true);
+  assert.equal(isSpecialLevel("隔離"), true);
   assert.equal(isSpecialLevel("16"), false);
 });
 
@@ -54,6 +55,6 @@ test("level arrays contain no duplicates", () => {
 });
 
 test("publish order records the current public JSON order", () => {
-  assert.deepEqual(PUBLISH_LEVEL_ORDER.slice(-5), ["★★4?", "★★5?", "★★6?", "★★7?", "?"]);
+  assert.deepEqual(PUBLISH_LEVEL_ORDER.slice(-6), ["★★4?", "★★5?", "★★6?", "★★7?", "?", "隔離"]);
   assert.equal(PUBLISH_LEVEL_ORDER.length, ALLOWED_LEVELS.length);
 });

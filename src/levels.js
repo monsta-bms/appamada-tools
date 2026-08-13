@@ -25,7 +25,7 @@ export const STEP_LEVELS = Object.freeze([
   "16",
 ]);
 
-export const SPECIAL_LEVELS = Object.freeze(["?", "★★4?", "★★5?", "★★6?", "★★7?"]);
+export const SPECIAL_LEVELS = Object.freeze(["?", "★★4?", "★★5?", "★★6?", "★★7?", "隔離"]);
 
 export const ALLOWED_LEVELS = Object.freeze([...STEP_LEVELS, ...SPECIAL_LEVELS]);
 
@@ -38,6 +38,7 @@ export const PUBLISH_LEVEL_ORDER = Object.freeze([
   "★★6?",
   "★★7?",
   "?",
+  "隔離",
 ]);
 
 const ALLOWED_LEVEL_SET = new Set(ALLOWED_LEVELS);

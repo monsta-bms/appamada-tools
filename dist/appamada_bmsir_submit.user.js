@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         不放逸 BMSIR申請
 // @namespace    https://github.com/monsta-bms/appamada-tools
-// @version      0.3.0
+// @version      0.4.0
 // @description  BMSIRから不放逸への譜面申請を補助します
 // @match        https://bms-ir.org/new/song*
 // @match        https://www.bms-ir.org/new/song*
@@ -400,7 +400,7 @@
     "15",
     "16"
   ]);
-  var SPECIAL_LEVELS = Object.freeze(["?", "★★4?", "★★5?", "★★6?", "★★7?"]);
+  var SPECIAL_LEVELS = Object.freeze(["?", "★★4?", "★★5?", "★★6?", "★★7?", "隔離"]);
   var ALLOWED_LEVELS = Object.freeze([...STEP_LEVELS, ...SPECIAL_LEVELS]);
   var PUBLISH_LEVEL_ORDER = Object.freeze([
     ...STEP_LEVELS,
@@ -408,7 +408,8 @@
     "★★5?",
     "★★6?",
     "★★7?",
-    "?"
+    "?",
+    "隔離"
   ]);
   var ALLOWED_LEVEL_SET = new Set(ALLOWED_LEVELS);
   var STEP_LEVEL_SET = new Set(STEP_LEVELS);
@@ -483,6 +484,7 @@
 .appamada-comment{display:grid;gap:5px;margin:14px 0}.appamada-comment textarea{box-sizing:border-box;width:100%;min-height:90px;padding:8px;font:inherit}
 .appamada-count{text-align:right}.appamada-count-error{color:#b00020;font-weight:700}
 .appamada-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.appamada-submit{padding:8px 16px;border:0;border-radius:6px;background:#244f91;color:#fff;cursor:pointer}.appamada-submit:disabled{background:#999;cursor:not-allowed}
+.appamada-submit-danger{background:#a51d2d}.appamada-warning{padding:10px;border-left:4px solid #a51d2d;background:#fff1f2;color:#6f101c}
 .appamada-status{margin:12px 0;padding:10px;border-radius:6px;background:#eef3fb}.appamada-status-error{background:#fdebec;color:#8b0018}.appamada-status-success{background:#e8f6ec;color:#145a28}
 .appamada-subheading{margin:14px 0 4px;font-weight:700}
 `;
@@ -797,6 +799,45 @@
       });
       update();
     }
+    function renderDelete(chart) {
+      const shell = modalShell("不放逸 削除申請");
+      shell.content.append(
+        facts([
+          ["曲名", chart.title],
+          ["artist", chart.artist],
+          ["投稿者", parsedPage.user.name],
+          ["現在難易度", chart.current_level]
+        ]),
+        element(document2, "p", {
+          className: "appamada-warning",
+          text: "☸0未満として不放逸から削除すべき譜面のみ申請してください。採用されると管理者の○反映時にkkjから譜面行が削除されます。"
+        })
+      );
+      let comment;
+      const commentControl = commentField(update);
+      comment = commentControl.textarea;
+      shell.content.append(commentControl.wrapper);
+      const statusContainer = element(document2, "div");
+      const actions = element(document2, "div", { className: "appamada-actions" });
+      const submit = element(document2, "button", {
+        className: "appamada-submit appamada-submit-danger",
+        text: "申請を送信",
+        type: "button"
+      });
+      actions.append(submit);
+      shell.content.append(statusContainer, actions);
+      function update() {
+        const busy = submit.dataset.submitting === "true" || submit.dataset.completed === "true";
+        submit.disabled = busy || codePointLength(comment.value) > 500;
+      }
+      submit.addEventListener("click", () => {
+        if (submit.disabled) return;
+        const payload = commonPayload("delete", comment.value.normalize("NFC"));
+        payload.proposed_level = "削除";
+        void runSubmit({ payload, button: submit, updateDisabled: update, statusContainer });
+      });
+      update();
+    }
     async function openWorkflow(applicationType) {
       closeMenu();
       const shell = modalShell("不放逸 申請");
@@ -808,7 +849,7 @@
           showMessage("申請できません", errorMessageFor(lookup.error.code));
           return;
         }
-        if (applicationType === "change" && !lookup.exists) {
+        if ((applicationType === "change" || applicationType === "delete") && !lookup.exists) {
           showMessage(
             "申請できません",
             "不放逸に未登録です。新規譜面申請を利用してください。"
@@ -823,6 +864,7 @@
           return;
         }
         if (applicationType === "change") renderChange(lookup.chart);
+        else if (applicationType === "delete") renderDelete(lookup.chart);
         else renderNew();
       } catch (error) {
         const code = error instanceof ApiClientError ? error.code : "INTERNAL_ERROR";
@@ -839,7 +881,8 @@
       menu.append(element(document2, "div", { className: "appamada-menu-title", text: "☸ 不放逸" }));
       for (const [label, type] of [
         ["難易度変更申請", "change"],
-        ["新規譜面申請", "new"]
+        ["新規譜面申請", "new"],
+        ["削除申請(難易度が☸0未満)", "delete"]
       ]) {
         const button = element(document2, "button", { text: label, type: "button" });
         button.dataset.action = type;
@@ -888,7 +931,7 @@
   }
 
   // src/submission-main.js
-  var CLIENT_VERSION = "0.3.0";
+  var CLIENT_VERSION = "0.4.0";
   var DEBUG = false;
   var logger = createLogger({ debug: DEBUG });
   var parseResult = parseBmsirPage(document, location.href);

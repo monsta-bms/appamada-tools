@@ -38,7 +38,7 @@ function record(overrides = {}) {
 test("publish order preserves the current kkj/public JSON special ordering", async () => {
   const logic = await loadLogic();
   assert.deepEqual(Array.from(logic.PUBLISH_LEVEL_ORDER).slice(-6), [
-    "16", "★★4?", "★★5?", "★★6?", "★★7?", "?",
+    "★★4?", "★★5?", "★★6?", "★★7?", "?", "隔離",
   ]);
 });
 
@@ -73,7 +73,7 @@ test("table order rejects internal blanks and duplicate MD5 values", async () =>
 
 test("table order accepts the required special block order", async () => {
   const logic = await loadLogic();
-  assert.equal(logic.analyzeTableOrder(rows(["16", "★★4?", "★★5?", "★★6?", "★★7?", "?"]), 1).ok, true);
+  assert.equal(logic.analyzeTableOrder(rows(["16", "★★4?", "★★5?", "★★6?", "★★7?", "?", "隔離"]), 1).ok, true);
 });
 
 test("insertion uses an existing block end", async () => {
@@ -173,6 +173,14 @@ test("change validation rejects same level and formulas in management fields", a
   assert.equal(logic.validateApplication(record(), { md5: "=A1" }, false).code, "CELL_FORMULA_NOT_ALLOWED");
 });
 
+test("delete validation requires an allowed original level and the fixed delete target", async () => {
+  const logic = await loadLogic();
+  const valid = record({ applicationType: "delete", originalLevel: "隔離", targetLevel: "削除" });
+  assert.equal(logic.validateApplication(valid, {}, false).ok, true);
+  assert.equal(logic.validateApplication({ ...valid, targetLevel: "0" }, {}, false).code, "LEVEL_INVALID");
+  assert.equal(logic.validateApplication({ ...valid, originalLevel: "hst1" }, {}, false).code, "LEVEL_INVALID");
+});
+
 test("state and retry rules exclude review, rejected, and applied rows", async () => {
   const logic = await loadLogic();
   assert.equal(logic.canProcessState("未処理", false), true);
@@ -194,7 +202,7 @@ test("admin manifest and source tree keep the bound script split by responsibili
   assert.equal(manifest.webapp, undefined);
   const names = [
     "Main.gs", "Config.gs", "Validation.gs", "ApplicationSheet.gs", "MasterTable.gs",
-    "TableOrder.gs", "ApplyChange.gs", "ApplyNew.gs", "Metadata.gs", "Recovery.gs",
+    "TableOrder.gs", "ApplyChange.gs", "ApplyNew.gs", "ApplyDelete.gs", "Metadata.gs", "Recovery.gs",
     "AdminMenu.gs", "TriggerSetup.gs", "Logging.gs", "IntegrationTest.gs",
   ];
   const sources = [];

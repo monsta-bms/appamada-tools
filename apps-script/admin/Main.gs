@@ -19,10 +19,14 @@ function processAdminApplicationRow_(rowNumber, options) {
     }
     validateAdminApplication_(application, settings.allowError);
     var masterSheet = getAdminMasterSheet_(spreadsheet);
-    var action = application.record.applicationType === "change" ? "apply_change" : "apply_new";
+    var action = application.record.applicationType === "change"
+      ? "apply_change"
+      : application.record.applicationType === "delete" ? "apply_delete" : "apply_new";
     var result = application.record.applicationType === "change"
       ? applyAdminChange_(spreadsheet, applicationSheet, masterSheet, application)
-      : applyAdminNew_(spreadsheet, applicationSheet, masterSheet, application);
+      : application.record.applicationType === "delete"
+        ? applyAdminDelete_(spreadsheet, applicationSheet, masterSheet, application)
+        : applyAdminNew_(spreadsheet, applicationSheet, masterSheet, application);
     logAdminDiagnostic_({
       request_id: application.record.requestId,
       application_type: application.record.applicationType,

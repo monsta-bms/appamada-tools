@@ -64,6 +64,7 @@ test("title and artist right-click open the custom menu", () => {
     const event = contextMenu(state.dom, state.document.querySelector(selector));
     assert.equal(event.defaultPrevented, true);
     assert.match(state.document.querySelector(".appamada-menu").textContent, /難易度変更申請/);
+    assert.match(state.document.querySelector(".appamada-menu").textContent, /削除申請\(難易度が☸0未満\)/);
     state.dom.window.close();
   }
 });
@@ -168,7 +169,7 @@ test("new modal renders every level and requires selection before submit", async
   await openWorkflow(state, "new");
   const levels = state.document.querySelectorAll(".appamada-level-grid [data-level]");
   const submit = state.document.querySelector(".appamada-submit");
-  assert.equal(levels.length, 29);
+  assert.equal(levels.length, 30);
   assert.equal(submit.disabled, true);
   state.document.querySelector('[data-level="10+"]').click();
   assert.equal(submit.disabled, false);
@@ -241,4 +242,34 @@ test("change payload excludes title, artist, and current level", async () => {
   assert.equal("artist" in submitted, false);
   assert.equal("current_level" in submitted, false);
   state.dom.window.close();
+});
+
+test("delete requires a registered chart and submits the fixed delete marker", async () => {
+  let submitted;
+  const state = setup({
+    lookup: async () => ({
+      ok: true,
+      exists: true,
+      chart: { title: "Server Title", artist: "Server Artist", current_level: "隔離" },
+    }),
+    submit: async (payload) => {
+      submitted = payload;
+      return { ok: true, request_id: UUID, deduplicated: false };
+    },
+  });
+  await openWorkflow(state, "delete");
+  assert.match(state.document.querySelector(".appamada-modal").textContent, /管理者の○反映時にkkjから譜面行が削除/);
+  state.document.querySelector("textarea").value = "☸0未満のため";
+  state.document.querySelector(".appamada-submit").click();
+  await flush();
+  assert.equal(submitted.application_type, "delete");
+  assert.equal(submitted.proposed_level, "削除");
+  assert.equal(submitted.comment, "☸0未満のため");
+  assert.equal("title" in submitted, false);
+  state.dom.window.close();
+
+  const missing = setup({ lookup: async () => ({ ok: true, exists: false }) });
+  await openWorkflow(missing, "delete");
+  assert.match(missing.document.querySelector(".appamada-modal").textContent, /新規譜面申請を利用/);
+  missing.dom.window.close();
 });

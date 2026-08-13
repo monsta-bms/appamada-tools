@@ -97,6 +97,67 @@ function recoverOneAdminMetadata_(spreadsheet, applicationSheet, masterSheet, me
     : recoverAdminNewMetadata_(spreadsheet, applicationSheet, masterSheet, application, metadata);
 }
 
+function recoverAdminDeletePlans_(spreadsheet, applicationSheet, masterSheet) {
+  var summary = { recovered: 0, failed: 0, ignored: 0 };
+  for (var rowNumber = 2; rowNumber <= applicationSheet.getLastRow(); rowNumber += 1) {
+    var application = readAdminApplication_(applicationSheet, rowNumber);
+    if (
+      application.record.applicationType !== "delete" ||
+      application.record.applyMark !== "○" ||
+      (application.record.state !== "未処理" && application.record.state !== "エラー") ||
+      application.record.memo !== createAdminDeletePlanMemo_(application)
+    ) continue;
+    try {
+      validateAdminApplication_(application, application.record.state === "エラー");
+      var matches = findAdminMasterRowsByMd5_(masterSheet, application.record.md5);
+      if (matches.length > 1) {
+        throwAdminError_("CHART_DUPLICATED", "このMD5はkkjで重複しています", "要確認");
+      }
+      if (matches.length === 0) {
+        assertAdminTableOrder_(masterSheet);
+        finalizeAdminApplication_(
+          spreadsheet,
+          applicationSheet,
+          rowNumber,
+          "kkjから削除済み（復旧）",
+        );
+      } else {
+        var target = validateAdminDeleteTarget_(masterSheet, application);
+        completeAdminDelete_(
+          spreadsheet,
+          applicationSheet,
+          masterSheet,
+          application,
+          target,
+          true,
+        );
+      }
+      summary.recovered += 1;
+      logAdminDiagnostic_({
+        request_id: application.record.requestId,
+        application_type: "delete",
+        action: "recover_delete",
+        application_row: rowNumber,
+        md5: application.record.md5,
+        result: "success",
+      });
+    } catch (error) {
+      summary.failed += 1;
+      markAdminApplicationFailure_(spreadsheet, applicationSheet, rowNumber, error);
+      logAdminDiagnostic_({
+        request_id: application.record.requestId,
+        application_type: "delete",
+        action: "recover_delete",
+        application_row: rowNumber,
+        md5: application.record.md5,
+        result: "error",
+        error_code: error.code || "RECOVERY_FAILED",
+      });
+    }
+  }
+  return summary;
+}
+
 function recoverInterruptedTransactions() {
   if (!isAdminApplyEnabled_()) {
     return { recovered: 0, cleaned: 0, failed: 0, ignored: 0, disabled: true };
@@ -106,7 +167,7 @@ function recoverInterruptedTransactions() {
   var masterSheet = getAdminMasterSheet_(spreadsheet);
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) throwAdminError_("LOCK_TIMEOUT", "recovery lock timeout", "エラー");
-  var summary = { recovered: 0, cleaned: 0, failed: 0, ignored: 0 };
+  var summary = { recovered: 0, cleaned: 0, failed: 0, ignored: 0, deletePlans: null };
   try {
     findAllAdminPlannedMetadata_(masterSheet).forEach(function (metadata) {
       var value;
@@ -139,6 +200,10 @@ function recoverInterruptedTransactions() {
         });
       }
     });
+    summary.deletePlans = recoverAdminDeletePlans_(spreadsheet, applicationSheet, masterSheet);
+    summary.recovered += summary.deletePlans.recovered;
+    summary.failed += summary.deletePlans.failed;
+    summary.ignored += summary.deletePlans.ignored;
   } finally {
     lock.releaseLock();
   }
