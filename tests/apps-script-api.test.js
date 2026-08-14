@@ -176,6 +176,13 @@ test("normal new stores parser title and artist", async () => {
   assert.equal(row[8], "");
 });
 
+test("13- is accepted as a proposed level", async () => {
+  const harness = await createAppsScriptHarness();
+  const result = harness.post(newPayload({ proposed_level: "13-" }));
+  assert.equal(result.ok, true);
+  assert.equal(harness.applications()[0][9], "13-");
+});
+
 test("new rejects an existing or duplicated chart", async () => {
   const existing = await createAppsScriptHarness({ kkjRows: [KJJ_ROW] });
   const payload = newPayload({

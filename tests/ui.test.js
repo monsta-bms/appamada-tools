@@ -4,6 +4,7 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 
 import { parseBmsirPage } from "../src/bmsir-parser.js";
+import { ALLOWED_LEVELS } from "../src/levels.js";
 import { errorMessageFor, installSubmissionUi } from "../src/ui.js";
 
 const MD5 = "b89279d026c9d40d0f5eedde2e25b920";
@@ -169,7 +170,7 @@ test("new modal renders every level and requires selection before submit", async
   await openWorkflow(state, "new");
   const levels = state.document.querySelectorAll(".appamada-level-grid [data-level]");
   const submit = state.document.querySelector(".appamada-submit");
-  assert.equal(levels.length, 30);
+  assert.equal(levels.length, ALLOWED_LEVELS.length);
   assert.equal(submit.disabled, true);
   state.document.querySelector('[data-level="10+"]').click();
   assert.equal(submit.disabled, false);

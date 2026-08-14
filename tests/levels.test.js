@@ -15,6 +15,7 @@ import {
 
 test("allowed-level membership is exact", () => {
   assert.equal(isAllowedLevel("10+"), true);
+  assert.equal(isAllowedLevel("13-"), true);
   assert.equal(isAllowedLevel("hst1"), false);
   assert.equal(isAllowedLevel("sst1"), false);
   assert.equal(isAllowedLevel("zst1"), false);
@@ -31,6 +32,8 @@ test("step and special membership is separated", () => {
 test("harder-level navigation follows STEP_LEVELS", () => {
   assert.equal(getHarderLevel("10"), "10+");
   assert.equal(getHarderLevel("10+"), "11-");
+  assert.equal(getHarderLevel("12+"), "13-");
+  assert.equal(getHarderLevel("13-"), "13");
   assert.equal(getHarderLevel("16"), null);
   assert.equal(getHarderLevel("?"), null);
   assert.equal(getHarderLevel("★★4?"), null);
@@ -38,6 +41,8 @@ test("harder-level navigation follows STEP_LEVELS", () => {
 
 test("easier-level navigation follows STEP_LEVELS", () => {
   assert.equal(getEasierLevel("11-"), "10+");
+  assert.equal(getEasierLevel("13"), "13-");
+  assert.equal(getEasierLevel("13-"), "12+");
   assert.equal(getEasierLevel("0"), null);
   assert.equal(getEasierLevel("?"), null);
 });
