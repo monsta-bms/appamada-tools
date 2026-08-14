@@ -1,6 +1,6 @@
-function applyAdminNew_(spreadsheet, applicationSheet, masterSheet, application) {
-  assertAdminTableOrder_(masterSheet);
-  var matches = findAdminMasterRowsByMd5_(masterSheet, application.record.md5);
+function applyAdminNew_(spreadsheet, applicationSheet, masterSheet, application, context) {
+  var state = getAdminMasterState_(masterSheet, context);
+  var matches = findAdminMasterIndexesByMd5_(state.rows, application.record.md5);
   if (matches.length > 1) throwAdminError_("CHART_DUPLICATED", "このMD5はkkjで重複しています", "要確認");
   if (matches.length === 1) {
     throwAdminError_(
@@ -10,7 +10,7 @@ function applyAdminNew_(spreadsheet, applicationSheet, masterSheet, application)
     );
   }
 
-  var insertionRow = planAdminMasterInsertion_(masterSheet, application.record.targetLevel);
+  var insertionRow = planAdminMasterInsertion_(masterSheet, application.record.targetLevel, state.rows);
   insertAdminMasterBlankRow_(masterSheet, insertionRow);
   var metadata = addAdminPlannedMetadata_(masterSheet, insertionRow, application);
   maybeInjectAdminFault_("FAIL_AFTER_BLANK_INSERT", application.record.requestId);
@@ -22,7 +22,7 @@ function applyAdminNew_(spreadsheet, applicationSheet, masterSheet, application)
     "",
   ]);
   maybeInjectAdminFault_("FAIL_AFTER_MASTER_WRITE", application.record.requestId);
-  assertAdminTableOrder_(masterSheet);
+  refreshAdminMasterState_(masterSheet, context);
   finalizeAdminApplication_(
     spreadsheet,
     applicationSheet,

@@ -3,10 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
-async function createHarness(propertyValue) {
+async function createHarness(propertyValue, { lockAvailable = true } = {}) {
   const properties = new Map();
   if (propertyValue !== undefined) properties.set("ADMIN_APPLY_ENABLED", propertyValue);
-  const calls = { spreadsheet: 0, apply: 0, alerts: [] };
+  const calls = { spreadsheet: 0, apply: 0, alerts: [], lockAttempts: 0, lockReleases: 0 };
   const context = vm.createContext({
     AppamadaAdminLogic: {
       failureState() { return "エラー"; },
@@ -29,7 +29,13 @@ async function createHarness(propertyValue) {
     },
     LockService: {
       getScriptLock() {
-        return { tryLock: () => true, releaseLock() {} };
+        return {
+          tryLock() {
+            calls.lockAttempts += 1;
+            return lockAvailable;
+          },
+          releaseLock() { calls.lockReleases += 1; },
+        };
       },
     },
   });
@@ -96,6 +102,67 @@ test("enabled application processing retains the existing apply path", async () 
   const result = context.processAdminApplicationRow_(2, {});
   assert.equal(result.ok, true);
   assert.equal(calls.apply, 1);
+});
+
+test("multi-row edits share one lock and one spreadsheet context", async () => {
+  const { context, calls } = await createHarness("true");
+  const spreadsheet = {};
+  const applicationSheet = {};
+  const eventSheet = { getName: () => context.ADMIN_CONFIG.applicationSheetName };
+  context.getAdminSpreadsheet_ = () => {
+    calls.spreadsheet += 1;
+    return spreadsheet;
+  };
+  context.getAdminApplicationSheet_ = () => applicationSheet;
+  context.readAdminApplication_ = (sheet, rowNumber) => ({
+    rowNumber,
+    record: {
+      applyMark: "○",
+      state: "未処理",
+      applicationType: "change",
+      requestId: `request-${rowNumber}`,
+      md5: String(rowNumber).padStart(32, "0"),
+    },
+  });
+  context.validateAdminApplication_ = () => {};
+  context.getAdminMasterSheet_ = () => ({});
+  context.applyAdminChange_ = () => {
+    calls.apply += 1;
+    return { ok: true };
+  };
+  context.logAdminDiagnostic_ = () => {};
+  context.markAdminApplicationFailure_ = () => {
+    throw new Error("failure path must not run");
+  };
+  const result = context.handleAdminEdit({
+    range: {
+      getSheet: () => eventSheet,
+      getColumn: () => 1,
+      getLastColumn: () => 1,
+      getRow: () => 2,
+      getLastRow: () => 3,
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.processed, 2);
+  assert.equal(calls.apply, 2);
+  assert.equal(calls.spreadsheet, 1);
+  assert.equal(calls.lockAttempts, 1);
+  assert.equal(calls.lockReleases, 1);
+});
+
+test("lock contention defers the row without writing an error state", async () => {
+  const { context, calls } = await createHarness("true", { lockAvailable: false });
+  let failures = 0;
+  context.logAdminDiagnostic_ = () => {};
+  context.markAdminApplicationFailure_ = () => { failures += 1; };
+  const result = context.processAdminApplicationRow_(2, {});
+  assert.equal(result.code, "LOCK_TIMEOUT");
+  assert.equal(result.deferred, true);
+  assert.equal(failures, 0);
+  assert.equal(calls.spreadsheet, 0);
+  assert.equal(calls.lockAttempts, 1);
+  assert.equal(calls.lockReleases, 0);
 });
 
 test("enabled recovery retains the existing empty-scan paths", async () => {

@@ -1,12 +1,12 @@
-function applyAdminChange_(spreadsheet, applicationSheet, masterSheet, application) {
-  assertAdminTableOrder_(masterSheet);
-  var matches = findAdminMasterRowsByMd5_(masterSheet, application.record.md5);
+function applyAdminChange_(spreadsheet, applicationSheet, masterSheet, application, context) {
+  var state = getAdminMasterState_(masterSheet, context);
+  var matches = findAdminMasterIndexesByMd5_(state.rows, application.record.md5);
   if (matches.length === 0) throwAdminError_("CHART_NOT_FOUND", "このMD5はkkjに存在しません", "要確認");
   if (matches.length > 1) throwAdminError_("CHART_DUPLICATED", "このMD5はkkjで重複しています", "要確認");
 
-  var sourceRow = matches[0];
+  var sourceRow = matches[0] + 2;
   validateAdminMasterFormulaFree_(masterSheet, sourceRow);
-  var masterRow = masterSheet.getRange(sourceRow, 1, 1, 5).getValues()[0];
+  var masterRow = state.rows[matches[0]].slice();
   var currentLevel = String(masterRow[0]);
   if (currentLevel !== application.record.originalLevel) {
     throwAdminError_(
@@ -16,7 +16,7 @@ function applyAdminChange_(spreadsheet, applicationSheet, masterSheet, applicati
     );
   }
 
-  var plan = planAdminMasterMove_(masterSheet, sourceRow, application.record.targetLevel);
+  var plan = planAdminMasterMove_(masterSheet, sourceRow, application.record.targetLevel, state.rows);
   var history = adminHistoryDate_() + " " + currentLevel + "→" + application.record.targetLevel;
   masterRow[0] = application.record.targetLevel;
   masterRow[4] = AppamadaAdminLogic.appendCommentHistory(masterRow[4], history);
@@ -31,7 +31,7 @@ function applyAdminChange_(spreadsheet, applicationSheet, masterSheet, applicati
   if (finalRow !== plan.finalRow) {
     throwAdminError_("METADATA_CONFLICT", "moved row metadata did not reach the planned row", "要確認");
   }
-  assertAdminTableOrder_(masterSheet);
+  refreshAdminMasterState_(masterSheet, context);
   finalizeAdminApplication_(
     spreadsheet,
     applicationSheet,

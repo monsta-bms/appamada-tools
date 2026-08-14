@@ -10,6 +10,7 @@ var ADMIN_CONFIG = Object.freeze({
   timezone: "Asia/Tokyo",
   metadataKey: "appamada_apply",
   maxAutomaticRetries: 3,
+  applyLockTimeoutMs: 30000,
 });
 
 function AdminApplyError(code, message, state) {

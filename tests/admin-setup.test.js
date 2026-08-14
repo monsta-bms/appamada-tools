@@ -65,10 +65,13 @@ class Spreadsheet {
     this.sheet = new Sheet(name);
     return this.sheet;
   }
+
+  getId() { return "test-spreadsheet"; }
 }
 
 async function loadSetup(initialSheet) {
   const spreadsheet = new Spreadsheet(initialSheet);
+  const rawWrites = [];
   const context = vm.createContext({
     ADMIN_APPLICATION_HEADERS: Object.freeze(headers),
     ADMIN_CONFIG: Object.freeze({ applicationSheetName: "申請一覧" }),
@@ -78,10 +81,22 @@ async function loadSetup(initialSheet) {
       Object.assign(error, { code, state });
       throw error;
     },
+    Sheets: {
+      Spreadsheets: {
+        Values: {
+          update(resource, spreadsheetId, range, options) {
+            const match = /^'申請一覧'!M(\d+):S\1$/.exec(range);
+            if (!match || spreadsheetId !== spreadsheet.getId()) throw new Error("bad range");
+            spreadsheet.sheet.getRange(Number(match[1]), 13, 1, 7).setValues(resource.values);
+            rawWrites.push({ resource, spreadsheetId, range, options });
+          },
+        },
+      },
+    },
   });
   const source = await readFile(new URL("../apps-script/admin/ApplicationSheet.gs", import.meta.url), "utf8");
   vm.runInContext(source, context, { filename: "ApplicationSheet.gs" });
-  return { context, spreadsheet };
+  return { context, spreadsheet, rawWrites };
 }
 
 test("admin setup creates the A:S application sheet without production identifiers", async () => {
@@ -110,4 +125,30 @@ test("admin setup rejects an existing incompatible sheet instead of overwriting 
   const before = structuredClone(sheet.rows);
   assert.throws(() => context.setupAdminApplicationSheet(), (error) => error.code === "SHEET_SCHEMA_INVALID");
   assert.deepEqual(sheet.rows, before);
+});
+
+test("application outcomes update only M:S with RAW input", async () => {
+  const applicationRow = [
+    "○", "new", "2026/08/14 12:00:00", "User", "190072",
+    "=Literal Title", "+Literal Artist", "00000000000000000000000000000001", "", "13-",
+    "comment", "https://bms-ir.org/new/song?songmd5=00000000000000000000000000000001",
+    "未処理", "", "", "request-id", "0.4.2", "", 0,
+  ];
+  const sheet = new Sheet("申請一覧", [headers, applicationRow]);
+  const { context, rawWrites } = await loadSetup(sheet);
+  const protectedValues = sheet.rows[1].slice(0, 12);
+  context.updateAdminApplicationOutcome_(context.getAdminSpreadsheet_(), sheet, 2, {
+    state: "反映済",
+    appliedAt: "2026/08/14 12:34:56",
+    memo: "kkj反映完了",
+    errorCode: "",
+    retryCount: 1,
+  });
+  assert.deepEqual(sheet.rows[1].slice(0, 12), protectedValues);
+  assert.deepEqual(sheet.rows[1].slice(12, 19), [
+    "反映済", "2026/08/14 12:34:56", "kkj反映完了", "request-id", "0.4.2", "", 1,
+  ]);
+  assert.equal(rawWrites.length, 1);
+  assert.equal(rawWrites[0].range, "'申請一覧'!M2:S2");
+  assert.equal(rawWrites[0].options.valueInputOption, "RAW");
 });

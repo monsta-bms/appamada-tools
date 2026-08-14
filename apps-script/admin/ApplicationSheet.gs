@@ -82,16 +82,29 @@ function writeAdminApplicationRowRaw_(spreadsheet, sheet, rowNumber, row) {
   }
 }
 
+function writeAdminApplicationOutcomeRaw_(spreadsheet, sheet, rowNumber, outcome) {
+  var range = "'" + sheet.getName().replace(/'/g, "''") + "'!M" + rowNumber + ":S" + rowNumber;
+  try {
+    Sheets.Spreadsheets.Values.update(
+      { values: [outcome] },
+      spreadsheet.getId(),
+      range,
+      { valueInputOption: "RAW" },
+    );
+  } catch (error) {
+    throwAdminError_("GOOGLE_SERVICE_ERROR", "申請一覧の処理結果を更新できませんでした", "エラー");
+  }
+}
+
 function updateAdminApplicationOutcome_(spreadsheet, sheet, rowNumber, options) {
-  var current = readAdminApplication_(sheet, rowNumber);
-  var row = current.row.slice();
-  row[12] = options.state;
-  row[13] = options.appliedAt === undefined ? row[13] : options.appliedAt;
-  row[14] = options.memo === undefined ? row[14] : options.memo;
-  row[17] = options.errorCode === undefined ? row[17] : options.errorCode;
-  if (options.retryCount !== undefined) row[18] = options.retryCount;
-  writeAdminApplicationRowRaw_(spreadsheet, sheet, rowNumber, row);
-  return row;
+  var outcome = sheet.getRange(rowNumber, 13, 1, 7).getValues()[0];
+  outcome[0] = options.state;
+  outcome[1] = options.appliedAt === undefined ? outcome[1] : options.appliedAt;
+  outcome[2] = options.memo === undefined ? outcome[2] : options.memo;
+  outcome[5] = options.errorCode === undefined ? outcome[5] : options.errorCode;
+  if (options.retryCount !== undefined) outcome[6] = options.retryCount;
+  writeAdminApplicationOutcomeRaw_(spreadsheet, sheet, rowNumber, outcome);
+  return outcome;
 }
 
 function finalizeAdminApplication_(spreadsheet, sheet, rowNumber, memo) {

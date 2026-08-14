@@ -4,14 +4,14 @@ function createAdminDeletePlanMemo_(application) {
     " level=" + application.record.originalLevel;
 }
 
-function validateAdminDeleteTarget_(masterSheet, application) {
-  assertAdminTableOrder_(masterSheet);
-  var matches = findAdminMasterRowsByMd5_(masterSheet, application.record.md5);
+function validateAdminDeleteTarget_(masterSheet, application, context) {
+  var state = getAdminMasterState_(masterSheet, context);
+  var matches = findAdminMasterIndexesByMd5_(state.rows, application.record.md5);
   if (matches.length === 0) throwAdminError_("CHART_NOT_FOUND", "このMD5はkkjに存在しません", "要確認");
   if (matches.length > 1) throwAdminError_("CHART_DUPLICATED", "このMD5はkkjで重複しています", "要確認");
-  var sourceRow = matches[0];
+  var sourceRow = matches[0] + 2;
   validateAdminMasterFormulaFree_(masterSheet, sourceRow);
-  var currentLevel = String(masterSheet.getRange(sourceRow, 1).getValue());
+  var currentLevel = String(state.rows[matches[0]][0]);
   if (currentLevel !== application.record.originalLevel) {
     throwAdminError_(
       "STALE_CURRENT_LEVEL",
@@ -22,11 +22,11 @@ function validateAdminDeleteTarget_(masterSheet, application) {
   return { sourceRow: sourceRow, currentLevel: currentLevel };
 }
 
-function completeAdminDelete_(spreadsheet, applicationSheet, masterSheet, application, target, recovered) {
+function completeAdminDelete_(spreadsheet, applicationSheet, masterSheet, application, target, recovered, context) {
   deleteAdminMasterRow_(masterSheet, target.sourceRow);
   try {
     maybeInjectAdminFault_("FAIL_AFTER_MASTER_DELETE", application.record.requestId);
-    assertAdminTableOrder_(masterSheet);
+    refreshAdminMasterState_(masterSheet, context);
     finalizeAdminApplication_(
       spreadsheet,
       applicationSheet,
@@ -40,8 +40,8 @@ function completeAdminDelete_(spreadsheet, applicationSheet, masterSheet, applic
   return { ok: true, deletedRow: target.sourceRow };
 }
 
-function applyAdminDelete_(spreadsheet, applicationSheet, masterSheet, application) {
-  var target = validateAdminDeleteTarget_(masterSheet, application);
+function applyAdminDelete_(spreadsheet, applicationSheet, masterSheet, application, context) {
+  var target = validateAdminDeleteTarget_(masterSheet, application, context);
   updateAdminApplicationOutcome_(spreadsheet, applicationSheet, application.rowNumber, {
     state: "未処理",
     memo: createAdminDeletePlanMemo_(application),
@@ -55,5 +55,6 @@ function applyAdminDelete_(spreadsheet, applicationSheet, masterSheet, applicati
     application,
     target,
     false,
+    context,
   );
 }

@@ -9,10 +9,37 @@ function readAdminMasterRows_(sheet) {
   return lastRow < 2 ? [] : sheet.getRange(2, 1, lastRow - 1, 5).getValues();
 }
 
-function assertAdminTableOrder_(sheet) {
-  var analysis = AppamadaAdminLogic.analyzeTableOrder(readAdminMasterRows_(sheet), 2);
+function readValidatedAdminMasterState_(sheet) {
+  var rows = readAdminMasterRows_(sheet);
+  var analysis = AppamadaAdminLogic.analyzeTableOrder(rows, 2);
   if (!analysis.ok) throwAdminError_(analysis.code, analysis.detail, "要確認");
-  return analysis;
+  return { rows: rows, analysis: analysis };
+}
+
+function getAdminMasterState_(sheet, context) {
+  if (context && context.masterState) return context.masterState;
+  var state = readValidatedAdminMasterState_(sheet);
+  if (context) context.masterState = state;
+  return state;
+}
+
+function refreshAdminMasterState_(sheet, context) {
+  var state = readValidatedAdminMasterState_(sheet);
+  if (context) context.masterState = state;
+  return state;
+}
+
+function assertAdminTableOrder_(sheet) {
+  return readValidatedAdminMasterState_(sheet).analysis;
+}
+
+function findAdminMasterIndexesByMd5_(rows, md5) {
+  var normalized = String(md5).toLowerCase();
+  var matches = [];
+  rows.forEach(function (row, index) {
+    if (String(row[3]).toLowerCase() === normalized) matches.push(index);
+  });
+  return matches;
 }
 
 function findAdminMasterRowsByMd5_(sheet, md5) {
@@ -170,15 +197,15 @@ function moveAdminMasterRow_(sheet, sourceRow, finalRow) {
   }
 }
 
-function planAdminMasterMove_(sheet, sourceRow, targetLevel) {
-  var rows = readAdminMasterRows_(sheet);
+function planAdminMasterMove_(sheet, sourceRow, targetLevel, rows) {
+  rows = rows || readAdminMasterRows_(sheet);
   var plan = AppamadaAdminLogic.planMove(rows, sourceRow - 2, targetLevel);
   if (!plan.ok) throwAdminError_(plan.code, plan.detail, "要確認");
   return { finalRow: plan.finalIndex + 2, rows: plan.rows };
 }
 
-function planAdminMasterInsertion_(sheet, targetLevel) {
-  var rows = readAdminMasterRows_(sheet);
+function planAdminMasterInsertion_(sheet, targetLevel, rows) {
+  rows = rows || readAdminMasterRows_(sheet);
   var insertion = AppamadaAdminLogic.insertionIndex(rows, targetLevel);
   if (!insertion.ok) throwAdminError_(insertion.code, insertion.detail, "要確認");
   return insertion.index + 2;

@@ -25,15 +25,19 @@ function application(overrides = {}) {
 
 async function loadDeleteHarness({ currentLevel = "隔離", matches = [12], failAfterDelete = false } = {}) {
   const calls = [];
-  const masterSheet = {
-    getRange(row, column) {
-      calls.push(["getRange", row, column]);
-      return { getValue: () => currentLevel };
-    },
-  };
+  const masterSheet = {};
+  const rows = Array.from({ length: Math.max(0, ...matches.map((row) => row - 1)) }, (_, index) => [
+    currentLevel,
+    `Title ${index}`,
+    `Artist ${index}`,
+    `000000000000000000000000${String(index).padStart(8, "0")}`,
+    "",
+  ]);
+  for (const row of matches) rows[row - 2][3] = MD5;
   const context = vm.createContext({
-    assertAdminTableOrder_() { calls.push(["assertOrder"]); },
-    findAdminMasterRowsByMd5_() { return matches.slice(); },
+    getAdminMasterState_() { return { rows }; },
+    findAdminMasterIndexesByMd5_() { return matches.map((row) => row - 2); },
+    refreshAdminMasterState_() { calls.push(["assertOrder"]); return { rows }; },
     validateAdminMasterFormulaFree_(sheet, row) { calls.push(["formulaFree", sheet, row]); },
     throwAdminError_(code, message, state) {
       const error = new Error(message);
