@@ -64,7 +64,7 @@ test("title and artist right-click open the custom menu", () => {
     const event = contextMenu(state.dom, state.document.querySelector(selector));
     assert.equal(event.defaultPrevented, true);
     assert.match(state.document.querySelector(".appamada-menu").textContent, /難易度変更申請/);
-    assert.match(state.document.querySelector(".appamada-menu").textContent, /削除申請\(難易度が☸0未満\)/);
+    assert.match(state.document.querySelector(".appamada-menu").textContent, /削除申請\(難易度が卍0未満\)/);
     state.dom.window.close();
   }
 });
@@ -129,10 +129,10 @@ test("change arrows use STEP_LEVELS and enforce boundaries", async () => {
   const submit = state.document.querySelector(".appamada-submit");
   assert.equal(submit.disabled, true);
   harder.click();
-  assert.equal(state.document.querySelector(".appamada-selected").textContent, "☸10+");
+  assert.equal(state.document.querySelector(".appamada-selected").textContent, "卍10+");
   assert.equal(submit.disabled, false);
   easier.click();
-  assert.equal(state.document.querySelector(".appamada-selected").textContent, "☸10");
+  assert.equal(state.document.querySelector(".appamada-selected").textContent, "卍10");
   assert.equal(submit.disabled, true);
   state.dom.window.close();
 

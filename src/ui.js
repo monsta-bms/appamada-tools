@@ -311,7 +311,7 @@ export function installSubmissionUi({
     }
 
     function update() {
-      selected.textContent = `☸${selectedLevel}`;
+      selected.textContent = `卍${selectedLevel}`;
       const harderLevel = getHarderLevel(selectedLevel);
       const easierLevel = getEasierLevel(selectedLevel);
       const busy = submit.dataset.submitting === "true" || submit.dataset.completed === "true";
@@ -428,7 +428,7 @@ export function installSubmissionUi({
       ]),
       element(document, "p", {
         className: "appamada-warning",
-        text: "☸0未満として不放逸から削除すべき譜面のみ申請してください。採用されると管理者の○反映時にkkjから譜面行が削除されます。",
+        text: "卍0未満として不放逸から削除すべき譜面のみ申請してください。採用されると管理者の○反映時にkkjから譜面行が削除されます。",
       }),
     );
 
@@ -501,11 +501,11 @@ export function installSubmissionUi({
     closeMenu();
     const menu = element(document, "div", { className: "appamada-menu" });
     menu.setAttribute("role", "menu");
-    menu.append(element(document, "div", { className: "appamada-menu-title", text: "☸ 不放逸" }));
+    menu.append(element(document, "div", { className: "appamada-menu-title", text: "卍 不放逸" }));
     for (const [label, type] of [
       ["難易度変更申請", "change"],
       ["新規譜面申請", "new"],
-      ["削除申請(難易度が☸0未満)", "delete"],
+      ["削除申請(難易度が卍0未満)", "delete"],
     ]) {
       const button = element(document, "button", { text: label, type: "button" });
       button.dataset.action = type;
