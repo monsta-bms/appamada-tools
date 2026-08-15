@@ -47,6 +47,19 @@ function adminHistoryDate_() {
   return Utilities.formatDate(new Date(), ADMIN_CONFIG.timezone, "yyyy.M.d");
 }
 
+function formatAdminNewComment_(comment, datePrefix) {
+  var value = String(comment || "");
+  return String(datePrefix) + (value ? " " + value : "");
+}
+
+function adminNewCommentDate_() {
+  return Utilities.formatDate(new Date(), ADMIN_CONFIG.timezone, "yyyy/M/d");
+}
+
+function adminNewComment_(comment) {
+  return formatAdminNewComment_(comment, adminNewCommentDate_());
+}
+
 function maybeInjectAdminFault_(point, requestId) {
   var value = PropertiesService.getScriptProperties().getProperty("TEST_" + point);
   if (value === "true" || value === requestId) throw new AdminInjectedFault(point);

@@ -69,7 +69,7 @@ function phase3AppendApplication_(spreadsheet, sheet, number, options) {
     md5,
     values.originalLevel === undefined ? (type === "new" ? "" : "9") : values.originalLevel,
     values.targetLevel === undefined ? "10+" : values.targetLevel,
-    "Phase3 integration " + number,
+    values.comment === undefined ? "Phase3 integration " + number : values.comment,
     "https://bms-ir.org/new/song?songmd5=" + md5 + "&view=new",
     values.state || "未処理",
     "",
@@ -231,6 +231,14 @@ function runPhase3IntegrationSuite() {
     var editedMaster = master.getRange(phase3FindMasterRow_(master, phase3Md5_(1201)), 1, 1, 5).getValues()[0];
     phase3Assert_(editedMaster[1] === "管理者修正Title" && editedMaster[2] === "管理者修正Artist", "F/G edited values");
     results.push("new_edited_fg");
+
+    var commented = phase3AppendApplication_(spreadsheet, applications, 29, {
+      type: "new", targetLevel: "12-", md5: phase3Md5_(1208), comment: "差分URL:XXXX",
+    });
+    phase3ApplyAndAssert_(applications, commented, "反映済", "");
+    var commentedMaster = master.getRange(phase3FindMasterRow_(master, phase3Md5_(1208)), 1, 1, 5).getValues()[0];
+    phase3Assert_(commentedMaster[4] === adminNewComment_("差分URL:XXXX"), "new dated comment");
+    results.push("new_dated_comment");
 
     var formula = phase3AppendApplication_(spreadsheet, applications, 23, { type: "new", targetLevel: "12", md5: phase3Md5_(1202) });
     applications.getRange(formula, 6).setFormula("=1+1");

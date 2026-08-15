@@ -11,15 +11,19 @@ function applyAdminNew_(spreadsheet, applicationSheet, masterSheet, application,
   }
 
   var insertionRow = planAdminMasterInsertion_(masterSheet, application.record.targetLevel, state.rows);
+  var newCommentDate = adminNewCommentDate_();
+  var newComment = formatAdminNewComment_(application.record.comment, newCommentDate);
   insertAdminMasterBlankRow_(masterSheet, insertionRow);
-  var metadata = addAdminPlannedMetadata_(masterSheet, insertionRow, application);
+  var metadata = addAdminPlannedMetadata_(masterSheet, insertionRow, application, {
+    new_comment_date: newCommentDate,
+  });
   maybeInjectAdminFault_("FAIL_AFTER_BLANK_INSERT", application.record.requestId);
   writeAdminMasterRowRaw_(spreadsheet, masterSheet, insertionRow, [
     application.record.targetLevel,
     application.record.title,
     application.record.artist,
     application.record.md5,
-    "",
+    newComment,
   ]);
   maybeInjectAdminFault_("FAIL_AFTER_MASTER_WRITE", application.record.requestId);
   refreshAdminMasterState_(masterSheet, context);

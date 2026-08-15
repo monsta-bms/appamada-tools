@@ -52,6 +52,7 @@ function readAdminApplication_(sheet, rowNumber) {
       md5: String(row[7]).toLowerCase(),
       originalLevel: String(row[8]),
       targetLevel: String(row[9]),
+      comment: String(row[10]),
       memo: String(row[14]),
       state: String(row[12]),
       requestId: String(row[15]),

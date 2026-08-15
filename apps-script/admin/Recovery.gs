@@ -45,15 +45,18 @@ function recoverAdminChangeMetadata_(spreadsheet, applicationSheet, masterSheet,
   return { ok: true, finalRow: finalRow };
 }
 
-function recoverAdminNewMetadata_(spreadsheet, applicationSheet, masterSheet, application, metadata) {
+function recoverAdminNewMetadata_(spreadsheet, applicationSheet, masterSheet, application, metadata, value) {
   var metadataRow = getAdminMetadataRow_(metadata);
   var current = masterSheet.getRange(metadataRow, 1, 1, 5).getValues()[0];
+  var expectedComment = Object.prototype.hasOwnProperty.call(value, "new_comment_date")
+    ? formatAdminNewComment_(application.record.comment, String(value.new_comment_date))
+    : "";
   var expected = [
     application.record.targetLevel,
     application.record.title,
     application.record.artist,
     application.record.md5,
-    "",
+    expectedComment,
   ];
   var blank = current.every(function (value) { return String(value) === ""; });
   var exact = current.every(function (value, index) { return String(value) === String(expected[index]); });
@@ -94,7 +97,7 @@ function recoverOneAdminMetadata_(spreadsheet, applicationSheet, masterSheet, me
   }
   return application.record.applicationType === "change"
     ? recoverAdminChangeMetadata_(spreadsheet, applicationSheet, masterSheet, application, metadata, value)
-    : recoverAdminNewMetadata_(spreadsheet, applicationSheet, masterSheet, application, metadata);
+    : recoverAdminNewMetadata_(spreadsheet, applicationSheet, masterSheet, application, metadata, value);
 }
 
 function recoverAdminDeletePlans_(spreadsheet, applicationSheet, masterSheet) {
