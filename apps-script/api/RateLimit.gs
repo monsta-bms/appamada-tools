@@ -19,8 +19,9 @@ function enforceRateLimit_(payload, config) {
     { key: "rate:u:" + bucket + ":" + userHash, limit: config.userLimit },
     { key: "rate:m:" + bucket + ":" + userHash + ":" + payload.md5, limit: config.userMd5Limit },
   ];
+  var cachedValues = cache.getAll(limits.map(function (item) { return item.key; }));
   var counters = limits.map(function (item) {
-    var raw = cache.get(item.key);
+    var raw = cachedValues[item.key];
     var count = raw && /^\d+$/.test(raw) ? Number(raw) : 0;
     return { key: item.key, limit: item.limit, count: count };
   });
@@ -30,7 +31,7 @@ function enforceRateLimit_(payload, config) {
       retryAfterMs: windowMs - (now % windowMs),
     });
   }
-  counters.forEach(function (item) {
-    cache.put(item.key, String(item.count + 1), config.rateWindowSeconds + 5);
-  });
+  var nextValues = {};
+  counters.forEach(function (item) { nextValues[item.key] = String(item.count + 1); });
+  cache.putAll(nextValues, config.rateWindowSeconds + 5);
 }

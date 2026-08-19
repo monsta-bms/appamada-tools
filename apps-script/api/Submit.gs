@@ -1,5 +1,6 @@
 function submitApplication_(rawPayload) {
-  if (!isSubmitEnabled_()) {
+  var propertyValues = PropertiesService.getScriptProperties().getProperties();
+  if (!isSubmitEnabled_(propertyValues)) {
     throwApiError_("SUBMISSIONS_DISABLED", "Application submissions are disabled");
   }
   var payload = validatePayload_(rawPayload);
@@ -12,7 +13,7 @@ function submitApplication_(rawPayload) {
   }
 
   try {
-    var config = getAppamadaConfig_();
+    var config = getAppamadaConfig_(propertyValues);
     var spreadsheet = getSpreadsheet_(config);
     var applicationSheet = getApplicationSheet_(config, spreadsheet);
     var existingRowNumber = findRequestRow_(applicationSheet, payload.request_id);

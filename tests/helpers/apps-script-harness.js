@@ -154,6 +154,16 @@ class FakeCache {
   put(key, value) {
     this.values.set(key, String(value));
   }
+
+  getAll(keys) {
+    return Object.fromEntries(
+      keys.filter((key) => this.values.has(key)).map((key) => [key, this.values.get(key)]),
+    );
+  }
+
+  putAll(values) {
+    for (const [key, value] of Object.entries(values)) this.put(key, value);
+  }
 }
 
 function textOutput(content) {
@@ -204,6 +214,9 @@ export async function createAppsScriptHarness({
         return {
           getProperty(name) {
             return scriptProperties.get(name) ?? null;
+          },
+          getProperties() {
+            return Object.fromEntries(scriptProperties);
           },
         };
       },

@@ -28,6 +28,11 @@ if (!parseResult.ok) {
       addStyle: typeof GM_addStyle === "function" ? GM_addStyle : undefined,
       logger,
     });
+    // Apps Scriptの起動・redirect待ちをユーザー操作より先に済ませる。
+    // openWorkflow側の同一MD5 lookupはin-flight共有またはcache hitになる。
+    void apiClient.lookup(parseResult.song.md5).catch((error) => {
+      logger.debug("LOOKUP_PREFETCH_FAILED", error?.code ?? "INTERNAL_ERROR");
+    });
   } catch (error) {
     logger.warn("SUBMISSION_INIT_FAILED", error?.code ?? "INTERNAL_ERROR");
   }

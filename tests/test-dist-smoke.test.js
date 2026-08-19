@@ -11,7 +11,7 @@ const expectedApiUrl =
 const pageUrl =
   "https://bms-ir.org/new/song?songmd5=b89279d026c9d40d0f5eedde2e25b920&view=new";
 
-test("Phase 2 test bundle has isolated metadata and starts without a request", async () => {
+test("Phase 2 test bundle has isolated metadata and starts with one lookup prefetch", async () => {
   const [source, html] = await Promise.all([readFile(distUrl, "utf8"), readFile(fixtureUrl, "utf8")]);
   assert.equal(source.startsWith("// ==UserScript=="), true);
   assert.match(source, /^\/\/ @version\s+0\.2\.0-test$/m);
@@ -31,7 +31,7 @@ test("Phase 2 test bundle has isolated metadata and starts without a request", a
   };
   dom.window.GM_addStyle = () => {};
   assert.doesNotThrow(() => dom.window.eval(source));
-  assert.equal(requests, 0);
+  assert.equal(requests, 1);
   assert.deepEqual(errors, []);
   dom.window.close();
 });

@@ -23,7 +23,7 @@ function normalizeEol(value) {
 function assertReleaseMetadata(source) {
   assert.equal(source.startsWith("// ==UserScript=="), true);
   assert.match(source, /^\/\/ @name\s+不放逸 BMSIR申請$/m);
-  assert.match(source, /^\/\/ @version\s+0\.4\.3$/m);
+  assert.match(source, /^\/\/ @version\s+0\.4\.4$/m);
   assert.match(source, /^\/\/ @run-at\s+document-idle$/m);
   assert.match(source, /^\/\/ @noframes$/m);
   assert.match(source, /^\/\/ @updateURL\s+https:\/\/raw\.githubusercontent\.com\/monsta-bms\/appamada-tools\/main\/dist\/appamada_bmsir_submit\.user\.js$/m);
@@ -71,7 +71,7 @@ test("production bundle has release metadata and differs from the check build on
   assert.doesNotThrow(() => new Function(publicSource));
 });
 
-test("production bundle initializes old and current logged-in DOM without an API request", async () => {
+test("production bundle initializes old and current logged-in DOM with one lookup prefetch", async () => {
   const source = await readFile(publicDistUrl, "utf8");
   for (const fixtureName of ["logged-in-song.html", "logged-in-song-current.html"]) {
     const html = await readFile(new URL(fixtureName, fixtureUrl), "utf8");
@@ -81,11 +81,15 @@ test("production bundle initializes old and current logged-in DOM without an API
     const dom = new JSDOM(html, { url: pageUrl, runScripts: "outside-only", virtualConsole });
     let requests = 0;
     let styles = 0;
-    dom.window.GM_xmlhttpRequest = () => { requests += 1; };
+    dom.window.GM_xmlhttpRequest = (details) => {
+      requests += 1;
+      assert.equal(details.method, "GET");
+      assert.match(details.url, /[?&]action=lookup(?:&|$)/);
+    };
     dom.window.GM_addStyle = () => { styles += 1; };
 
     assert.doesNotThrow(() => dom.window.eval(source));
-    assert.equal(requests, 0);
+    assert.equal(requests, 1);
     assert.equal(styles, 1);
     assert.deepEqual(consoleErrors, []);
     dom.window.close();

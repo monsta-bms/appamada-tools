@@ -10,7 +10,7 @@ const pageUrl =
 
 test("production candidate uses release metadata without public update URLs", async () => {
   const [source, html] = await Promise.all([readFile(bundleUrl, "utf8"), readFile(fixtureUrl, "utf8")]);
-  assert.match(source, /^\/\/ @version\s+0\.4\.3-rc\.2$/m);
+  assert.match(source, /^\/\/ @version\s+0\.4\.4-rc\.1$/m);
   assert.match(source, /^\/\/ @name\s+不放逸 BMSIR申請 \[Production Candidate\]$/m);
   assert.match(source, /^\/\/ @connect\s+script\.google\.com$/m);
   assert.match(source, /^\/\/ @connect\s+script\.googleusercontent\.com$/m);
@@ -26,7 +26,7 @@ test("production candidate uses release metadata without public update URLs", as
   dom.window.GM_xmlhttpRequest = () => { requests += 1; };
   dom.window.GM_addStyle = () => {};
   assert.doesNotThrow(() => dom.window.eval(source));
-  assert.equal(requests, 0);
+  assert.equal(requests, 1);
   assert.deepEqual(errors, []);
   dom.window.close();
 });

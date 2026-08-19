@@ -36,22 +36,23 @@ var APPAMADA_DEFAULTS = Object.freeze({
   rateWindowSeconds: 600,
 });
 
-function positiveIntegerProperty_(properties, name, fallback) {
-  var raw = properties.getProperty(name);
-  if (raw === null || raw === "") return fallback;
+function positiveIntegerProperty_(values, name, fallback) {
+  var raw = values[name];
+  if (raw === null || raw === undefined || raw === "") return fallback;
   if (!/^\d+$/.test(raw) || Number(raw) < 1) {
     throwApiError_("INTERNAL_ERROR", "Invalid Script Property: " + name);
   }
   return Number(raw);
 }
 
-function isSubmitEnabled_() {
-  return PropertiesService.getScriptProperties().getProperty("SUBMIT_ENABLED") === "true";
+function isSubmitEnabled_(providedValues) {
+  var values = providedValues || PropertiesService.getScriptProperties().getProperties();
+  return values.SUBMIT_ENABLED === "true";
 }
 
-function getAppamadaConfig_() {
-  var properties = PropertiesService.getScriptProperties();
-  var spreadsheetId = String(properties.getProperty("SPREADSHEET_ID") || "").trim();
+function getAppamadaConfig_(providedValues) {
+  var values = providedValues || PropertiesService.getScriptProperties().getProperties();
+  var spreadsheetId = String(values.SPREADSHEET_ID || "").trim();
   if (!spreadsheetId) {
     throwApiError_("SHEET_NOT_FOUND", "SPREADSHEET_ID is not configured");
   }
@@ -60,14 +61,14 @@ function getAppamadaConfig_() {
     applicationSheetName: APPAMADA_DEFAULTS.applicationSheetName,
     chartSheetName: APPAMADA_DEFAULTS.chartSheetName,
     timezone: APPAMADA_DEFAULTS.timezone,
-    userLimit: positiveIntegerProperty_(properties, "USER_LIMIT", APPAMADA_DEFAULTS.userLimit),
+    userLimit: positiveIntegerProperty_(values, "USER_LIMIT", APPAMADA_DEFAULTS.userLimit),
     userMd5Limit: positiveIntegerProperty_(
-      properties,
+      values,
       "USER_MD5_LIMIT",
       APPAMADA_DEFAULTS.userMd5Limit,
     ),
     globalLimit: positiveIntegerProperty_(
-      properties,
+      values,
       "GLOBAL_LIMIT",
       APPAMADA_DEFAULTS.globalLimit,
     ),

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         不放逸 BMSIR申請
 // @namespace    https://github.com/monsta-bms/appamada-tools
-// @version      0.4.3
+// @version      0.4.4
 // @description  BMSIRから不放逸への譜面申請を補助します
 // @match        https://bms-ir.org/new/song*
 // @match        https://www.bms-ir.org/new/song*
@@ -990,7 +990,7 @@
   }
 
   // src/submission-main.js
-  var CLIENT_VERSION = "0.4.3";
+  var CLIENT_VERSION = "0.4.4";
   var DEBUG = false;
   var logger = createLogger({ debug: DEBUG });
   var parseResult = parseBmsirPage(document, location.href);
@@ -1013,6 +1013,9 @@
         clientVersion: CLIENT_VERSION,
         addStyle: typeof GM_addStyle === "function" ? GM_addStyle : void 0,
         logger
+      });
+      void apiClient.lookup(parseResult.song.md5).catch((error) => {
+        logger.debug("LOOKUP_PREFETCH_FAILED", error?.code ?? "INTERNAL_ERROR");
       });
     } catch (error) {
       logger.warn("SUBMISSION_INIT_FAILED", error?.code ?? "INTERNAL_ERROR");
