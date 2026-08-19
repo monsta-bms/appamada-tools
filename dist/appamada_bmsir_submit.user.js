@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         不放逸 BMSIR申請
 // @namespace    https://github.com/monsta-bms/appamada-tools
-// @version      0.4.4
+// @version      0.4.5
 // @description  BMSIRから不放逸への譜面申請を補助します
 // @match        https://bms-ir.org/new/song*
 // @match        https://www.bms-ir.org/new/song*
@@ -869,7 +869,7 @@
         ]),
         element(document2, "p", {
           className: "appamada-warning",
-          text: "卍0未満として不放逸から削除すべき譜面のみ申請してください。採用されると管理者の○反映時にkkjから譜面行が削除されます。"
+          text: "卍0未満として不放逸から削除すべき譜面のみ申請してください。"
         })
       );
       let comment;
@@ -990,7 +990,7 @@
   }
 
   // src/submission-main.js
-  var CLIENT_VERSION = "0.4.4";
+  var CLIENT_VERSION = "0.4.5";
   var DEBUG = false;
   var logger = createLogger({ debug: DEBUG });
   var parseResult = parseBmsirPage(document, location.href);

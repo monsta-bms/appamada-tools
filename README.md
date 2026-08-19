@@ -14,9 +14,9 @@ BMS難易度表「不放逸」とBMSIRを連携するUserscriptの開発リポ�
 
 Phase 4でproduction導入済みです。運用は[Phase 3 管理者承認](docs/phase3-admin.md)と[Phase 4 production rollout](docs/phase4-production.md)を参照してください。本番識別子はsourceやdocsへ保存せず、production Web App URLだけを公開dist生成時に注入します。
 
-### 0.4.4
+### 0.4.5
 
-BMSIR譜面ページを開いた直後に登録状況を先読みし、申請メニュー選択後の待ち時間を短縮しました。Apps Script API側もScript Propertiesとrate limit cacheを一括取得・更新し、送信時のサービス呼び出し回数を削減しています。サーバー側の譜面再確認、重複防止、rate limit、RAW書込みは維持しています。
+BMS-IRの現行譜面ページ構造への対応を維持しつつ、譜面ページを開いた直後に登録状況を先読みして申請画面を開くまでの待ち時間を短縮しました。Apps Script API側もサービス呼び出し回数を削減しています。
 
 ### 0.4.3
 

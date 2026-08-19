@@ -335,7 +335,14 @@ test("delete requires a registered chart and submits the fixed delete marker", a
     },
   });
   await openWorkflow(state, "delete");
-  assert.match(state.document.querySelector(".appamada-modal").textContent, /管理者の○反映時にkkjから譜面行が削除/);
+  assert.match(
+    state.document.querySelector(".appamada-modal").textContent,
+    /卍0未満として不放逸から削除すべき譜面のみ申請してください。/,
+  );
+  assert.doesNotMatch(
+    state.document.querySelector(".appamada-modal").textContent,
+    /採用されると|管理者|kkj/,
+  );
   state.document.querySelector("textarea").value = "☸0未満のため";
   state.document.querySelector(".appamada-submit").click();
   await flush();

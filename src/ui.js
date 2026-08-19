@@ -430,7 +430,7 @@ export function installSubmissionUi({
       ]),
       element(document, "p", {
         className: "appamada-warning",
-        text: "卍0未満として不放逸から削除すべき譜面のみ申請してください。採用されると管理者の○反映時にkkjから譜面行が削除されます。",
+        text: "卍0未満として不放逸から削除すべき譜面のみ申請してください。",
       }),
     );
 
