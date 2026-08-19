@@ -1,5 +1,5 @@
 import { ApiClientError } from "./api-client.js";
-import { codePointLength } from "./bmsir-parser.js";
+import { codePointLength, resolveSongElements } from "./bmsir-parser.js";
 import {
   SPECIAL_LEVELS,
   STEP_LEVELS,
@@ -52,10 +52,10 @@ const STYLE = `
 .appamada-menu button{display:block;width:100%;padding:8px 10px;text-align:left;border:0;background:transparent;border-radius:5px;color:inherit;cursor:pointer}
 .appamada-menu button:hover,.appamada-menu button:focus{background:#e8eef8;outline:2px solid #4b75b8}
 .appamada-overlay{position:fixed;inset:0;z-index:12010;display:grid;place-items:center;padding:20px;background:#0008}
-.appamada-modal{box-sizing:border-box;width:min(680px,100%);max-height:90vh;overflow:auto;padding:20px;background:#fff;color:#222;border-radius:12px;box-shadow:0 14px 40px #0006}
+.appamada-modal{box-sizing:border-box;width:min(680px,100%);max-height:90vh;overflow:auto;padding:20px;background:#fff;color:#222;color-scheme:light;border-radius:12px;box-shadow:0 14px 40px #0006}
 .appamada-modal-header{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #ddd}
 .appamada-modal-header h2{margin:0 0 12px;font-size:1.25rem;color:#222;font-weight:700;opacity:1;text-shadow:none}
-.appamada-close{padding:5px 10px;border:1px solid #888;border-radius:5px;background:#fff;cursor:pointer}
+.appamada-close{padding:5px 10px;border:1px solid #888;border-radius:5px;background:#fff;color:#222;opacity:1;-webkit-text-fill-color:#222;cursor:pointer}
 .appamada-facts{display:grid;grid-template-columns:max-content 1fr;gap:5px 12px;margin:16px 0}
 .appamada-facts dt{font-weight:700}.appamada-facts dd{margin:0;overflow-wrap:anywhere}
 .appamada-level-grid{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 14px}
@@ -63,7 +63,7 @@ const STYLE = `
 .appamada-level-grid button[aria-pressed="true"]{background:#244f91;color:#fff;border-color:#244f91}
 .appamada-step{display:flex;align-items:center;justify-content:center;gap:10px;margin:12px 0}
 .appamada-selected{min-width:90px;text-align:center;font-weight:700;font-size:1.2rem}
-.appamada-comment{display:grid;gap:5px;margin:14px 0}.appamada-comment textarea{box-sizing:border-box;width:100%;min-height:90px;padding:8px;font:inherit}
+.appamada-comment{display:grid;gap:5px;margin:14px 0}.appamada-comment textarea{box-sizing:border-box;width:100%;min-height:90px;padding:8px;border:1px solid #777;background:#fff;color:#222;color-scheme:light;opacity:1;-webkit-text-fill-color:#222;caret-color:#222;font:inherit}
 .appamada-count{text-align:right}.appamada-count-error{color:#b00020;font-weight:700}
 .appamada-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.appamada-submit{padding:8px 16px;border:0;border-radius:6px;background:#244f91;color:#fff;cursor:pointer}.appamada-submit:disabled{background:#999;cursor:not-allowed}
 .appamada-submit-danger{background:#a51d2d}.appamada-warning{padding:10px;border-left:4px solid #a51d2d;background:#fff1f2;color:#6f101c}
@@ -111,11 +111,13 @@ export function installSubmissionUi({
   addStyle,
   logger,
 }) {
-  const titleElement = document.querySelector("#box > h1");
-  const artistElement = titleElement?.nextElementSibling;
-  if (!titleElement || artistElement?.tagName !== "H2") {
-    throw new Error("Parsed song elements are no longer available");
+  const resolvedSongElements = resolveSongElements(document);
+  if (!resolvedSongElements.ok) {
+    const error = new Error("Parsed song elements are no longer available");
+    error.code = resolvedSongElements.error;
+    throw error;
   }
+  const { titleElement, artistElement } = resolvedSongElements;
 
   if (typeof addStyle === "function") {
     addStyle(STYLE);

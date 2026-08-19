@@ -1,5 +1,5 @@
 import { createApiClient } from "./api-client.js";
-import { parseBmsirPage } from "./bmsir-parser.js";
+import { collectDomDiagnostics, parseBmsirPage } from "./bmsir-parser.js";
 import { createLogger } from "./logger.js";
 import { installSubmissionUi } from "./ui.js";
 
@@ -9,7 +9,10 @@ const logger = createLogger({ debug: DEBUG });
 const parseResult = parseBmsirPage(document, location.href);
 
 if (!parseResult.ok) {
-  logger.debug("PARSE_FAILED", parseResult.error);
+  logger.warn("PARSE_FAILED", {
+    code: parseResult.error,
+    ...collectDomDiagnostics(document, location.href),
+  });
 } else {
   try {
     const apiClient = createApiClient({

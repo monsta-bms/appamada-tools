@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         不放逸 BMSIR申請
 // @namespace    https://github.com/monsta-bms/appamada-tools
-// @version      0.4.2
+// @version      0.4.3
 // @description  BMSIRから不放逸への譜面申請を補助します
 // @match        https://bms-ir.org/new/song*
 // @match        https://www.bms-ir.org/new/song*
@@ -206,6 +206,10 @@
   var MD5_PATTERN2 = /^[0-9a-f]{32}$/i;
   var PLAYER_ID_PATTERN = /^\d{1,20}$/;
   var SONG_HOSTNAMES = /* @__PURE__ */ new Set(["bms-ir.org", "www.bms-ir.org"]);
+  var SONG_LAYOUTS = Object.freeze([
+    Object.freeze({ name: "current", containerSelector: "#box > main#main-content" }),
+    Object.freeze({ name: "legacy", containerSelector: "#box" })
+  ]);
   function normalizeText(value) {
     return String(value ?? "").trim().normalize("NFC");
   }
@@ -222,8 +226,8 @@
       return null;
     }
   }
-  function directAnchors(element2) {
-    return Array.from(element2.children).filter((child) => child.tagName === "A");
+  function userAnchors(element2) {
+    return Array.from(element2.querySelectorAll("a")).filter((anchor) => !anchor.closest("form"));
   }
   function resolveAnchors(anchors, pageUrl) {
     return anchors.flatMap((anchor) => {
@@ -244,7 +248,7 @@
     if (!page || !userElements || userElements.length !== 1) {
       return failure(PARSER_ERRORS.USER_DOM_INVALID);
     }
-    const anchors = resolveAnchors(directAnchors(userElements[0]), page);
+    const anchors = resolveAnchors(userAnchors(userElements[0]), page);
     const sameOriginAnchors = anchors.filter(({ url }) => url.origin === page.origin);
     if (sameOriginAnchors.some(({ url }) => url.pathname === "/login")) {
       return failure(PARSER_ERRORS.NOT_LOGGED_IN);
@@ -271,6 +275,70 @@
       }
     };
   }
+  function directChildren(container, selector) {
+    return Array.from(container.children).filter((child) => child.matches(selector));
+  }
+  function md5InfoElements(container) {
+    return directChildren(container, "p.muted").filter(
+      (element2) => MD5_INFO_PATTERN.test(normalizeText(element2.textContent))
+    );
+  }
+  function resolveLayout(document2, layout) {
+    const containers = document2.querySelectorAll(layout.containerSelector);
+    if (containers.length !== 1) return null;
+    const container = containers[0];
+    const titleElements = directChildren(container, "h1");
+    const artistElements = directChildren(container, "h2");
+    const md5Elements = md5InfoElements(container);
+    if (titleElements.length !== 1 || artistElements.length !== 1 || md5Elements.length !== 1) {
+      return null;
+    }
+    const titleElement = titleElements[0];
+    const artistElement = artistElements[0];
+    if (titleElement.compareDocumentPosition(artistElement) & 2) return null;
+    return {
+      layout: layout.name,
+      container,
+      titleElement,
+      artistElement,
+      md5InfoElement: md5Elements[0]
+    };
+  }
+  function resolveSongElements(document2) {
+    if (!document2?.querySelectorAll) {
+      return failure(PARSER_ERRORS.SONG_DOM_INVALID);
+    }
+    const matches = SONG_LAYOUTS.flatMap((layout) => {
+      const resolved = resolveLayout(document2, layout);
+      return resolved ? [resolved] : [];
+    });
+    if (matches.length !== 1) {
+      return failure(PARSER_ERRORS.SONG_DOM_INVALID);
+    }
+    return { ok: true, ...matches[0] };
+  }
+  function collectDomDiagnostics(document2, pageUrl) {
+    const page = parseUrl(pageUrl);
+    const count = (selector) => document2?.querySelectorAll?.(selector)?.length ?? 0;
+    const matchingMd5Count = (selector) => Array.from(document2?.querySelectorAll?.(selector) ?? []).filter(
+      (element2) => MD5_INFO_PATTERN.test(normalizeText(element2.textContent))
+    ).length;
+    const users = Array.from(document2?.querySelectorAll?.("#user") ?? []);
+    const anchors = users.length === 1 ? resolveAnchors(userAnchors(users[0]), pageUrl) : [];
+    return Object.freeze({
+      pathname: page?.pathname ?? "",
+      userMatches: users.length,
+      profileMatches: anchors.filter(({ url }) => url.pathname === "/new/player").length,
+      logoutMatches: anchors.filter(({ url }) => url.pathname === "/logout").length,
+      currentContainerMatches: count("#box > main#main-content"),
+      currentTitleMatches: count("#box > main#main-content > h1"),
+      currentArtistMatches: count("#box > main#main-content > h2"),
+      currentMd5InfoMatches: matchingMd5Count("#box > main#main-content > p.muted"),
+      legacyTitleMatches: count("#box > h1"),
+      legacyArtistMatches: count("#box > h2"),
+      legacyMd5InfoMatches: matchingMd5Count("#box > p.muted")
+    });
+  }
   function parseSong(document2, pageUrl) {
     const page = parseUrl(pageUrl);
     if (!page || page.protocol !== "https:" || !SONG_HOSTNAMES.has(page.hostname) || page.pathname !== "/new/song") {
@@ -280,22 +348,10 @@
     if (urlMd5Values.length !== 1 || !MD5_PATTERN2.test(urlMd5Values[0])) {
       return failure(PARSER_ERRORS.MD5_INVALID);
     }
-    const titleElements = document2?.querySelectorAll?.("#box > h1");
-    if (!titleElements || titleElements.length !== 1) {
-      return failure(PARSER_ERRORS.SONG_DOM_INVALID);
-    }
-    const titleElement = titleElements[0];
-    const artistElement = titleElement.nextElementSibling;
-    if (!artistElement || artistElement.tagName !== "H2") {
-      return failure(PARSER_ERRORS.SONG_DOM_INVALID);
-    }
-    const md5Matches = Array.from(document2.querySelectorAll("#box > p.muted")).flatMap((element2) => {
-      const match = MD5_INFO_PATTERN.exec(normalizeText(element2.textContent));
-      return match ? [{ rankingKey: match[1], hash: match[2] }] : [];
-    });
-    if (md5Matches.length !== 1) {
-      return failure(PARSER_ERRORS.SONG_DOM_INVALID);
-    }
+    const resolved = resolveSongElements(document2);
+    if (!resolved.ok) return resolved;
+    const { titleElement, artistElement, md5InfoElement } = resolved;
+    const md5Match = MD5_INFO_PATTERN.exec(normalizeText(md5InfoElement.textContent));
     const title = normalizeText(titleElement.textContent);
     if (!title) {
       return failure(PARSER_ERRORS.TITLE_REQUIRED);
@@ -311,8 +367,8 @@
       return failure(PARSER_ERRORS.ARTIST_TOO_LONG);
     }
     const md5 = urlMd5Values[0].toLowerCase();
-    const rankingKey = md5Matches[0].rankingKey.toLowerCase();
-    const hash = md5Matches[0].hash.toLowerCase();
+    const rankingKey = md5Match[1].toLowerCase();
+    const hash = md5Match[2].toLowerCase();
     if (md5 !== rankingKey || md5 !== hash) {
       return failure(PARSER_ERRORS.MD5_MISMATCH);
     }
@@ -471,10 +527,10 @@
 .appamada-menu button{display:block;width:100%;padding:8px 10px;text-align:left;border:0;background:transparent;border-radius:5px;color:inherit;cursor:pointer}
 .appamada-menu button:hover,.appamada-menu button:focus{background:#e8eef8;outline:2px solid #4b75b8}
 .appamada-overlay{position:fixed;inset:0;z-index:12010;display:grid;place-items:center;padding:20px;background:#0008}
-.appamada-modal{box-sizing:border-box;width:min(680px,100%);max-height:90vh;overflow:auto;padding:20px;background:#fff;color:#222;border-radius:12px;box-shadow:0 14px 40px #0006}
+.appamada-modal{box-sizing:border-box;width:min(680px,100%);max-height:90vh;overflow:auto;padding:20px;background:#fff;color:#222;color-scheme:light;border-radius:12px;box-shadow:0 14px 40px #0006}
 .appamada-modal-header{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #ddd}
 .appamada-modal-header h2{margin:0 0 12px;font-size:1.25rem;color:#222;font-weight:700;opacity:1;text-shadow:none}
-.appamada-close{padding:5px 10px;border:1px solid #888;border-radius:5px;background:#fff;cursor:pointer}
+.appamada-close{padding:5px 10px;border:1px solid #888;border-radius:5px;background:#fff;color:#222;opacity:1;-webkit-text-fill-color:#222;cursor:pointer}
 .appamada-facts{display:grid;grid-template-columns:max-content 1fr;gap:5px 12px;margin:16px 0}
 .appamada-facts dt{font-weight:700}.appamada-facts dd{margin:0;overflow-wrap:anywhere}
 .appamada-level-grid{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 14px}
@@ -482,7 +538,7 @@
 .appamada-level-grid button[aria-pressed="true"]{background:#244f91;color:#fff;border-color:#244f91}
 .appamada-step{display:flex;align-items:center;justify-content:center;gap:10px;margin:12px 0}
 .appamada-selected{min-width:90px;text-align:center;font-weight:700;font-size:1.2rem}
-.appamada-comment{display:grid;gap:5px;margin:14px 0}.appamada-comment textarea{box-sizing:border-box;width:100%;min-height:90px;padding:8px;font:inherit}
+.appamada-comment{display:grid;gap:5px;margin:14px 0}.appamada-comment textarea{box-sizing:border-box;width:100%;min-height:90px;padding:8px;border:1px solid #777;background:#fff;color:#222;color-scheme:light;opacity:1;-webkit-text-fill-color:#222;caret-color:#222;font:inherit}
 .appamada-count{text-align:right}.appamada-count-error{color:#b00020;font-weight:700}
 .appamada-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.appamada-submit{padding:8px 16px;border:0;border-radius:6px;background:#244f91;color:#fff;cursor:pointer}.appamada-submit:disabled{background:#999;cursor:not-allowed}
 .appamada-submit-danger{background:#a51d2d}.appamada-warning{padding:10px;border-left:4px solid #a51d2d;background:#fff1f2;color:#6f101c}
@@ -525,11 +581,13 @@
     addStyle,
     logger: logger2
   }) {
-    const titleElement = document2.querySelector("#box > h1");
-    const artistElement = titleElement?.nextElementSibling;
-    if (!titleElement || artistElement?.tagName !== "H2") {
-      throw new Error("Parsed song elements are no longer available");
+    const resolvedSongElements = resolveSongElements(document2);
+    if (!resolvedSongElements.ok) {
+      const error = new Error("Parsed song elements are no longer available");
+      error.code = resolvedSongElements.error;
+      throw error;
     }
+    const { titleElement, artistElement } = resolvedSongElements;
     if (typeof addStyle === "function") {
       addStyle(STYLE);
     } else if (!document2.querySelector("style[data-appamada-style]")) {
@@ -932,12 +990,15 @@
   }
 
   // src/submission-main.js
-  var CLIENT_VERSION = "0.4.2";
+  var CLIENT_VERSION = "0.4.3";
   var DEBUG = false;
   var logger = createLogger({ debug: DEBUG });
   var parseResult = parseBmsirPage(document, location.href);
   if (!parseResult.ok) {
-    logger.debug("PARSE_FAILED", parseResult.error);
+    logger.warn("PARSE_FAILED", {
+      code: parseResult.error,
+      ...collectDomDiagnostics(document, location.href)
+    });
   } else {
     try {
       const apiClient = createApiClient({

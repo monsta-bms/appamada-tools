@@ -5,11 +5,13 @@ import { JSDOM } from "jsdom";
 
 import {
   PARSER_ERRORS,
+  collectDomDiagnostics,
   codePointLength,
   normalizeText,
   parseBmsirPage,
   parseLoggedInUser,
   parseSong,
+  resolveSongElements,
 } from "../src/bmsir-parser.js";
 
 const MD5 = "b89279d026c9d40d0f5eedde2e25b920";
@@ -42,6 +44,27 @@ test("logged-in fixture parses the anonymized user", async () => {
   assert.deepEqual(result, { ok: true, user: { name: "FixtureUser", playerId: "123456" } });
 });
 
+test("current logged-in fixture parses the anonymized user and song", async () => {
+  const document = await documentFrom("logged-in-song-current.html");
+  assert.deepEqual(parseLoggedInUser(document, PAGE_URL), {
+    ok: true,
+    user: { name: "FixtureUser", playerId: "123456" },
+  });
+  assert.equal(resolveSongElements(document).layout, "current");
+  const result = parseSong(document, PAGE_URL);
+  assert.equal(result.ok, true);
+  assert.equal(result.song.title, "図書室のエルザ [FOX]");
+  assert.equal(result.song.artist, EXPECTED_ARTIST);
+  assert.equal(result.song.md5, MD5);
+});
+
+test("current logged-out fixture keeps song parsing separate from login state", async () => {
+  const document = await documentFrom("logged-out-song-current.html");
+  expectError(parseLoggedInUser(document, PAGE_URL), PARSER_ERRORS.NOT_LOGGED_IN);
+  assert.equal(parseSong(document, PAGE_URL).ok, true);
+  expectError(parseBmsirPage(document, PAGE_URL), PARSER_ERRORS.NOT_LOGGED_IN);
+});
+
 test("notification counts do not affect login parsing", async () => {
   for (const count of [0, 5, 999]) {
     const document = await documentFrom("logged-in-song.html");
@@ -63,6 +86,19 @@ test("links nested in forms are ignored", async () => {
   nestedLogin.href = "/login";
   document.querySelector("#user > form").append(nestedLogin);
   assert.equal(parseLoggedInUser(document, PAGE_URL).ok, true);
+});
+
+test("profile and logout links may be wrapped inside the user region", async () => {
+  const document = await documentFrom("logged-in-song.html");
+  const user = document.querySelector("#user");
+  const wrapper = document.createElement("span");
+  wrapper.className = "account-links";
+  for (const anchor of [...user.querySelectorAll(":scope > a")]) wrapper.append(anchor);
+  user.prepend(wrapper);
+  assert.deepEqual(parseLoggedInUser(document, PAGE_URL), {
+    ok: true,
+    user: { name: "FixtureUser", playerId: "123456" },
+  });
 });
 
 test("a direct /login anchor reports NOT_LOGGED_IN", async () => {
@@ -176,11 +212,50 @@ test("missing or duplicate #box > h1 reports SONG_DOM_INVALID", async () => {
   expectError(parseSong(duplicate, PAGE_URL), PARSER_ERRORS.SONG_DOM_INVALID);
 });
 
-test("a non-h2 next sibling reports SONG_DOM_INVALID", async () => {
-  expectError(
-    parseSong(await documentFrom("malformed-song.html"), PAGE_URL),
-    PARSER_ERRORS.SONG_DOM_INVALID,
+test("title and artist remain related without requiring immediate adjacency", async () => {
+  assert.equal(parseSong(await documentFrom("malformed-song.html"), PAGE_URL).ok, true);
+});
+
+test("current layout rejects ambiguous direct title or artist candidates", async () => {
+  const duplicateTitle = await documentFrom("logged-in-song-current.html");
+  const title = duplicateTitle.querySelector("#main-content > h1");
+  title.after(title.cloneNode(true));
+  expectError(parseSong(duplicateTitle, PAGE_URL), PARSER_ERRORS.SONG_DOM_INVALID);
+
+  const duplicateArtist = await documentFrom("logged-in-song-current.html");
+  const artist = duplicateArtist.querySelector("#main-content > h2");
+  artist.after(artist.cloneNode(true));
+  expectError(parseSong(duplicateArtist, PAGE_URL), PARSER_ERRORS.SONG_DOM_INVALID);
+});
+
+test("current layout keeps URL, ranking_key, and hash three-way validation", async () => {
+  const document = await documentFrom("logged-in-song-current.html");
+  const md5Info = [...document.querySelectorAll("#main-content > p.muted")].find((element) =>
+    element.textContent.includes("ranking_key:"),
   );
+  md5Info.firstChild.textContent =
+    `ranking_key: ${MD5} / hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa / `;
+  expectError(parseSong(document, PAGE_URL), PARSER_ERRORS.MD5_MISMATCH);
+});
+
+test("DOM diagnostics expose counts and path without user or song text", async () => {
+  const document = await documentFrom("logged-in-song-current.html");
+  const diagnostic = collectDomDiagnostics(document, PAGE_URL);
+  assert.deepEqual(diagnostic, {
+    pathname: "/new/song",
+    userMatches: 1,
+    profileMatches: 1,
+    logoutMatches: 1,
+    currentContainerMatches: 1,
+    currentTitleMatches: 1,
+    currentArtistMatches: 1,
+    currentMd5InfoMatches: 1,
+    legacyTitleMatches: 0,
+    legacyArtistMatches: 0,
+    legacyMd5InfoMatches: 0,
+  });
+  const serialized = JSON.stringify(diagnostic);
+  assert.doesNotMatch(serialized, /FixtureUser|図書室|b89279/i);
 });
 
 test("zero or multiple matching MD5 paragraphs reports SONG_DOM_INVALID", async () => {

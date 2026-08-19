@@ -14,6 +14,10 @@ BMS難易度表「不放逸」とBMSIRを連携するUserscriptの開発リポ�
 
 Phase 4でproduction導入済みです。運用は[Phase 3 管理者承認](docs/phase3-admin.md)と[Phase 4 production rollout](docs/phase4-production.md)を参照してください。本番識別子はsourceやdocsへ保存せず、production Web App URLだけを公開dist生成時に注入します。
 
+### 0.4.3
+
+BMS-IRの現行譜面ページ構造に対応し、曲名・artistの右クリックメニューが初期化されない問題を修正しました。BMS-IRの暗色フォームCSSがモーダルへ干渉しないよう閉じるボタンとコメント欄の配色も局所的に固定しています。旧DOM fallbackと、個人情報や曲情報を含めないfatal parse診断ログを維持しています。
+
 ## 開発
 
 対応するNode.jsを用意し、依存関係を導入します。

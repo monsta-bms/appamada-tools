@@ -23,7 +23,7 @@ function normalizeEol(value) {
 function assertReleaseMetadata(source) {
   assert.equal(source.startsWith("// ==UserScript=="), true);
   assert.match(source, /^\/\/ @name\s+不放逸 BMSIR申請$/m);
-  assert.match(source, /^\/\/ @version\s+0\.4\.2$/m);
+  assert.match(source, /^\/\/ @version\s+0\.4\.3$/m);
   assert.match(source, /^\/\/ @run-at\s+document-idle$/m);
   assert.match(source, /^\/\/ @noframes$/m);
   assert.match(source, /^\/\/ @updateURL\s+https:\/\/raw\.githubusercontent\.com\/monsta-bms\/appamada-tools\/main\/dist\/appamada_bmsir_submit\.user\.js$/m);
@@ -71,25 +71,25 @@ test("production bundle has release metadata and differs from the check build on
   assert.doesNotThrow(() => new Function(publicSource));
 });
 
-test("production bundle initializes the logged-in UI without an API request", async () => {
-  const [source, html] = await Promise.all([
-    readFile(publicDistUrl, "utf8"),
-    readFile(new URL("logged-in-song.html", fixtureUrl), "utf8"),
-  ]);
-  const virtualConsole = new VirtualConsole();
-  const consoleErrors = [];
-  virtualConsole.on("jsdomError", (error) => consoleErrors.push(error));
-  const dom = new JSDOM(html, { url: pageUrl, runScripts: "outside-only", virtualConsole });
-  let requests = 0;
-  let styles = 0;
-  dom.window.GM_xmlhttpRequest = () => { requests += 1; };
-  dom.window.GM_addStyle = () => { styles += 1; };
+test("production bundle initializes old and current logged-in DOM without an API request", async () => {
+  const source = await readFile(publicDistUrl, "utf8");
+  for (const fixtureName of ["logged-in-song.html", "logged-in-song-current.html"]) {
+    const html = await readFile(new URL(fixtureName, fixtureUrl), "utf8");
+    const virtualConsole = new VirtualConsole();
+    const consoleErrors = [];
+    virtualConsole.on("jsdomError", (error) => consoleErrors.push(error));
+    const dom = new JSDOM(html, { url: pageUrl, runScripts: "outside-only", virtualConsole });
+    let requests = 0;
+    let styles = 0;
+    dom.window.GM_xmlhttpRequest = () => { requests += 1; };
+    dom.window.GM_addStyle = () => { styles += 1; };
 
-  assert.doesNotThrow(() => dom.window.eval(source));
-  assert.equal(requests, 0);
-  assert.equal(styles, 1);
-  assert.deepEqual(consoleErrors, []);
-  dom.window.close();
+    assert.doesNotThrow(() => dom.window.eval(source));
+    assert.equal(requests, 0);
+    assert.equal(styles, 1);
+    assert.deepEqual(consoleErrors, []);
+    dom.window.close();
+  }
 });
 
 test("production bundle leaves a logged-out page untouched", async () => {
@@ -106,5 +106,29 @@ test("production bundle leaves a logged-out page untouched", async () => {
   assert.doesNotThrow(() => dom.window.eval(source));
   assert.equal(dom.serialize(), before);
   assert.equal(externalCalls, 0);
+  dom.window.close();
+});
+
+test("fatal parse failure emits a structured warning with no page text", async () => {
+  const [source, html] = await Promise.all([
+    readFile(publicDistUrl, "utf8"),
+    readFile(new URL("logged-in-song-current.html", fixtureUrl), "utf8"),
+  ]);
+  const virtualConsole = new VirtualConsole();
+  const warnings = [];
+  virtualConsole.on("warn", (...args) => warnings.push(args));
+  const dom = new JSDOM(html, { url: pageUrl, runScripts: "outside-only", virtualConsole });
+  const title = dom.window.document.querySelector("#main-content > h1");
+  title.after(title.cloneNode(true));
+  dom.window.GM_xmlhttpRequest = () => {};
+  dom.window.GM_addStyle = () => {};
+
+  assert.doesNotThrow(() => dom.window.eval(source));
+  assert.equal(warnings.length, 1);
+  const serialized = JSON.stringify(warnings[0]);
+  assert.match(serialized, /PARSE_FAILED/);
+  assert.match(serialized, /SONG_DOM_INVALID/);
+  assert.match(serialized, /currentTitleMatches/);
+  assert.doesNotMatch(serialized, /FixtureUser|図書室|b89279/i);
   dom.window.close();
 });

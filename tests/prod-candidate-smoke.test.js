@@ -4,13 +4,13 @@ import test from "node:test";
 import { JSDOM, VirtualConsole } from "jsdom";
 
 const bundleUrl = new URL("../.local/appamada_bmsir_submit.prod-candidate.user.js", import.meta.url);
-const fixtureUrl = new URL("./fixtures/logged-in-song.html", import.meta.url);
+const fixtureUrl = new URL("./fixtures/logged-in-song-current.html", import.meta.url);
 const pageUrl =
   "https://bms-ir.org/new/song?songmd5=b89279d026c9d40d0f5eedde2e25b920&view=new";
 
 test("production candidate uses release metadata without public update URLs", async () => {
   const [source, html] = await Promise.all([readFile(bundleUrl, "utf8"), readFile(fixtureUrl, "utf8")]);
-  assert.match(source, /^\/\/ @version\s+0\.3\.0-rc\.1$/m);
+  assert.match(source, /^\/\/ @version\s+0\.4\.3-rc\.2$/m);
   assert.match(source, /^\/\/ @name\s+不放逸 BMSIR申請 \[Production Candidate\]$/m);
   assert.match(source, /^\/\/ @connect\s+script\.google\.com$/m);
   assert.match(source, /^\/\/ @connect\s+script\.googleusercontent\.com$/m);

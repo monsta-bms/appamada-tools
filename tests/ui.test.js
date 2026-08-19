@@ -3,18 +3,26 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 
-import { parseBmsirPage } from "../src/bmsir-parser.js";
+import { parseBmsirPage, resolveSongElements } from "../src/bmsir-parser.js";
 import { ALLOWED_LEVELS } from "../src/levels.js";
 import { errorMessageFor, installSubmissionUi } from "../src/ui.js";
 
 const MD5 = "b89279d026c9d40d0f5eedde2e25b920";
 const PAGE_URL = `https://bms-ir.org/new/song?songmd5=${MD5}&view=new`;
 const UUID = "123e4567-e89b-42d3-a456-426614174000";
-const fixture = await readFile(new URL("./fixtures/logged-in-song.html", import.meta.url), "utf8");
+const legacyFixture = await readFile(
+  new URL("./fixtures/logged-in-song.html", import.meta.url),
+  "utf8",
+);
+const currentFixture = await readFile(
+  new URL("./fixtures/logged-in-song-current.html", import.meta.url),
+  "utf8",
+);
 
-function setup({ lookup, submit } = {}) {
-  const dom = new JSDOM(fixture, { url: PAGE_URL, pretendToBeVisual: true });
+function setup({ lookup, submit, html = legacyFixture } = {}) {
+  const dom = new JSDOM(html, { url: PAGE_URL, pretendToBeVisual: true });
   const parsedPage = parseBmsirPage(dom.window.document, PAGE_URL);
+  let styleText = "";
   const apiClient = {
     lookup: lookup ?? (async () => ({ ok: true, exists: false })),
     submit: submit ?? (async () => ({ ok: true, request_id: UUID, deduplicated: false })),
@@ -25,9 +33,9 @@ function setup({ lookup, submit } = {}) {
     parsedPage,
     apiClient,
     cryptoObject: { randomUUID: () => UUID },
-    addStyle() {},
+    addStyle(css) { styleText = css; },
   });
-  return { dom, document: dom.window.document, ui, apiClient };
+  return { dom, document: dom.window.document, ui, apiClient, styleText };
 }
 
 function contextMenu(dom, target, options = {}) {
@@ -47,7 +55,7 @@ async function flush() {
 }
 
 async function openWorkflow(state, action) {
-  contextMenu(state.dom, state.document.querySelector("#box > h1"));
+  contextMenu(state.dom, resolveSongElements(state.document).titleElement);
   state.document.querySelector(`.appamada-menu [data-action="${action}"]`).click();
   await flush();
 }
@@ -70,6 +78,56 @@ test("title and artist right-click open the custom menu", () => {
   }
 });
 
+test("modal form colors override the current BMS-IR dark form defaults", () => {
+  const state = setup({ html: currentFixture });
+  assert.match(
+    state.styleText,
+    /\.appamada-close\{[^}]*background:#fff;[^}]*color:#222;[^}]*opacity:1;[^}]*-webkit-text-fill-color:#222;/,
+  );
+  assert.match(
+    state.styleText,
+    /\.appamada-comment textarea\{[^}]*border:1px solid #777;[^}]*background:#fff;[^}]*color:#222;[^}]*color-scheme:light;[^}]*opacity:1;[^}]*-webkit-text-fill-color:#222;/,
+  );
+  assert.doesNotMatch(state.styleText, /(^|})\s*(button|textarea)\s*\{/);
+  state.dom.window.close();
+});
+
+test("current title and artist right-click open the custom menu", () => {
+  for (const selector of ["#main-content > h1", "#main-content > h2"]) {
+    const state = setup({ html: currentFixture });
+    const event = contextMenu(state.dom, state.document.querySelector(selector));
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(state.document.querySelectorAll(".appamada-menu").length, 1);
+    state.dom.window.close();
+  }
+});
+
+test("right-clicking title and artist child elements opens one menu", () => {
+  for (const [selector, childTag] of [
+    ["#main-content > h1", "span"],
+    ["#main-content > h2", "a"],
+  ]) {
+    const state = setup({ html: currentFixture });
+    const target = state.document.querySelector(selector);
+    const child = state.document.createElement(childTag);
+    child.textContent = target.textContent;
+    target.replaceChildren(child);
+    const event = contextMenu(state.dom, child);
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(state.document.querySelectorAll(".appamada-menu").length, 1);
+    state.dom.window.close();
+  }
+});
+
+test("repeated contextmenu events never leave duplicate menus", () => {
+  const state = setup({ html: currentFixture });
+  const title = state.document.querySelector("#main-content > h1");
+  contextMenu(state.dom, title);
+  contextMenu(state.dom, title);
+  assert.equal(state.document.querySelectorAll(".appamada-menu").length, 1);
+  state.dom.window.close();
+});
+
 test("other elements do not open the menu", () => {
   const state = setup();
   const event = contextMenu(state.dom, state.document.querySelector("#box > p"));
@@ -78,9 +136,27 @@ test("other elements do not open the menu", () => {
   state.dom.window.close();
 });
 
+test("current page sections outside the song headings keep the native menu", () => {
+  const state = setup({ html: currentFixture });
+  const event = contextMenu(state.dom, state.document.querySelector(".song-section-tags h2"));
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(state.document.querySelector(".appamada-menu"), null);
+  state.dom.window.close();
+});
+
 test("Shift+right-click preserves the native context menu", () => {
   const state = setup();
   const event = contextMenu(state.dom, state.document.querySelector("#box > h1"), { shiftKey: true });
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(state.document.querySelector(".appamada-menu"), null);
+  state.dom.window.close();
+});
+
+test("current title Shift+right-click preserves the native context menu", () => {
+  const state = setup({ html: currentFixture });
+  const event = contextMenu(state.dom, state.document.querySelector("#main-content > h1"), {
+    shiftKey: true,
+  });
   assert.equal(event.defaultPrevented, false);
   assert.equal(state.document.querySelector(".appamada-menu"), null);
   state.dom.window.close();
