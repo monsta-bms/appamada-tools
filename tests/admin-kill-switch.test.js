@@ -6,7 +6,7 @@ import vm from "node:vm";
 async function createHarness(propertyValue, { lockAvailable = true } = {}) {
   const properties = new Map();
   if (propertyValue !== undefined) properties.set("ADMIN_APPLY_ENABLED", propertyValue);
-  const calls = { spreadsheet: 0, apply: 0, alerts: [], lockAttempts: 0, lockReleases: 0 };
+  const calls = { spreadsheet: 0, apply: 0, ensureOrder: 0, alerts: [], lockAttempts: 0, lockReleases: 0 };
   const context = vm.createContext({
     AppamadaAdminLogic: {
       failureState() { return "エラー"; },
@@ -91,6 +91,7 @@ test("enabled application processing retains the existing apply path", async () 
   });
   context.validateAdminApplication_ = () => {};
   context.getAdminMasterSheet_ = () => ({});
+  context.ensureAdminMasterOrderForApply_ = () => { calls.ensureOrder += 1; };
   context.applyAdminChange_ = () => {
     calls.apply += 1;
     return { ok: true };
@@ -102,6 +103,7 @@ test("enabled application processing retains the existing apply path", async () 
   const result = context.processAdminApplicationRow_(2, {});
   assert.equal(result.ok, true);
   assert.equal(calls.apply, 1);
+  assert.equal(calls.ensureOrder, 1);
 });
 
 test("multi-row edits share one lock and one spreadsheet context", async () => {
@@ -126,6 +128,7 @@ test("multi-row edits share one lock and one spreadsheet context", async () => {
   });
   context.validateAdminApplication_ = () => {};
   context.getAdminMasterSheet_ = () => ({});
+  context.ensureAdminMasterOrderForApply_ = () => { calls.ensureOrder += 1; };
   context.applyAdminChange_ = () => {
     calls.apply += 1;
     return { ok: true };
@@ -146,6 +149,7 @@ test("multi-row edits share one lock and one spreadsheet context", async () => {
   assert.equal(result.ok, true);
   assert.equal(result.processed, 2);
   assert.equal(calls.apply, 2);
+  assert.equal(calls.ensureOrder, 2);
   assert.equal(calls.spreadsheet, 1);
   assert.equal(calls.lockAttempts, 1);
   assert.equal(calls.lockReleases, 1);

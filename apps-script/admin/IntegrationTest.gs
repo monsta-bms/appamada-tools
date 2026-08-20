@@ -200,14 +200,12 @@ function runPhase3IntegrationSuite() {
     phase3Assert_(assertAdminTableOrder_(master).md5Count === 17, "duplicate table restore");
 
     var invalidOrderRow = phase3FindMasterRow_(master, phase3Md5_(2));
-    master.getRange(invalidOrderRow, 1).setValue("10");
+    moveAdminMasterRow_(master, invalidOrderRow, master.getLastRow());
     SpreadsheetApp.flush();
     var invalidOrder = phase3AppendApplication_(spreadsheet, applications, 51, { md5: phase3Md5_(9), originalLevel: "12-", targetLevel: "13" });
-    phase3ApplyAndAssert_(applications, invalidOrder, "要確認", "TABLE_ORDER_INVALID");
-    master.getRange(invalidOrderRow, 1).setValue("0");
-    SpreadsheetApp.flush();
-    phase3Assert_(assertAdminTableOrder_(master).md5Count === 17, "invalid order restore");
-    results.push("duplicate_table_defense", "invalid_order_defense");
+    phase3ApplyAndAssert_(applications, invalidOrder, "反映済", "");
+    phase3Assert_(assertAdminTableOrder_(master).md5Count === 17, "invalid order auto repair");
+    results.push("duplicate_table_defense", "invalid_order_auto_repair");
 
     for (var index = 0; index < 5; index += 1) {
       var targets = ["10", "11+", "0", "?", "★★6?"];

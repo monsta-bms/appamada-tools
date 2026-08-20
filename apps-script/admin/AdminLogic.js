@@ -5,7 +5,7 @@ var AppamadaAdminLogic = (function () {
     "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
     "10-", "10", "10+", "11-", "11", "11+", "12-", "12", "12+",
     "13-", "13", "13+", "14", "15", "16",
-    "★★4?", "★★5?", "★★6?", "★★7?", "?", "隔離",
+    "★★4?", "★★5?", "★★6?", "★★7?", "隔離", "?",
   ]);
   var MD5_PATTERN = /^[0-9a-f]{32}$/i;
   var UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -104,6 +104,43 @@ var AppamadaAdminLogic = (function () {
       }
     }
     return { ok: true, index: rows.length };
+  }
+
+  function planStableTableSort(rows, startRow) {
+    var firstSheetRow = Number(startRow || 1);
+    var levelIndexes = Object.create(null);
+    PUBLISH_LEVEL_ORDER.forEach(function (level, index) { levelIndexes[level] = index; });
+    var seenMd5 = Object.create(null);
+    var entries = [];
+
+    for (var index = 0; index < rows.length; index += 1) {
+      var row = Array.isArray(rows[index]) ? rows[index] : [];
+      var sheetRow = firstSheetRow + index;
+      var isBlank = row.slice(0, 5).every(function (value) { return text(value) === ""; });
+      if (isBlank) return fail("TABLE_ORDER_INVALID", "blank row at " + sheetRow);
+      var level = text(row[0]);
+      var md5 = text(row[3]).toLowerCase();
+      if (!Object.prototype.hasOwnProperty.call(levelIndexes, level)) {
+        return fail("TABLE_ORDER_INVALID", "unknown level at " + sheetRow + ": " + level);
+      }
+      if (!MD5_PATTERN.test(md5)) {
+        return fail("TABLE_ORDER_INVALID", "invalid md5 at " + sheetRow);
+      }
+      if (seenMd5[md5]) {
+        return fail("CHART_DUPLICATED", "duplicate md5 at " + seenMd5[md5] + " and " + sheetRow);
+      }
+      seenMd5[md5] = sheetRow;
+      entries.push({ row: row.slice(), levelIndex: levelIndexes[level], originalIndex: index, md5: md5 });
+    }
+
+    entries.sort(function (left, right) {
+      return left.levelIndex - right.levelIndex || left.originalIndex - right.originalIndex;
+    });
+    var sortedRows = entries.map(function (entry) { return entry.row; });
+    var changed = entries.some(function (entry, index) {
+      return entry.md5 !== text(rows[index][3]).toLowerCase();
+    });
+    return { ok: true, changed: changed, rows: sortedRows };
   }
 
   function planMove(rows, sourceIndex, targetLevel) {
@@ -234,6 +271,7 @@ var AppamadaAdminLogic = (function () {
     RETRYABLE_ERROR_CODES: RETRYABLE_ERROR_CODES,
     analyzeTableOrder: analyzeTableOrder,
     insertionIndex: insertionIndex,
+    planStableTableSort: planStableTableSort,
     planMove: planMove,
     moveRowsDestinationIndex: moveRowsDestinationIndex,
     moveTouchesFrozenRows: moveTouchesFrozenRows,

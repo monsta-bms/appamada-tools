@@ -80,11 +80,15 @@ class Sheet {
     this.filter = null;
     this.insertions = [];
     this.deletions = [];
+    this.moves = [];
+    this.frozenRows = 1;
   }
 
   getLastRow() { return this.rows.length; }
   getMaxRows() { return this.maxRows; }
   getFilter() { return this.filter; }
+  getFrozenRows() { return this.frozenRows; }
+  setFrozenRows(value) { this.frozenRows = value; }
   getRange(startRow, startColumn, rowCount = 1, columnCount = 1) {
     if (typeof startRow === "string") {
       const match = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(startRow);
@@ -120,12 +124,20 @@ class Sheet {
     this.rows.splice(rowNumber - 1, 1);
     this.maxRows -= 1;
   }
+  moveRows(range, destinationIndex) {
+    const sourceIndex = range.startRow - 1;
+    const moved = this.rows.splice(sourceIndex, range.rowCount);
+    const insertionIndex = destinationIndex - 1 - (destinationIndex > range.startRow ? range.rowCount : 0);
+    this.rows.splice(insertionIndex, 0, ...moved);
+    this.moves.push({ sourceRow: range.startRow, rowCount: range.rowCount, destinationIndex });
+  }
 }
 
 async function loadMasterTable(sheet) {
   const logicSource = await readFile(new URL("../apps-script/admin/AdminLogic.js", import.meta.url), "utf8");
   const masterSource = await readFile(new URL("../apps-script/admin/MasterTable.gs", import.meta.url), "utf8");
   const spreadsheet = { getSheetByName() { return sheet; } };
+  const logs = [];
   const context = vm.createContext({
     ADMIN_CONFIG: Object.freeze({ masterSheetName: "kkj" }),
     getAdminSpreadsheet_() { return spreadsheet; },
@@ -134,9 +146,11 @@ async function loadMasterTable(sheet) {
       Object.assign(error, { code, detail, state });
       throw error;
     },
+    logAdminDiagnostic_(entry) { logs.push(entry); },
   });
   vm.runInContext(logicSource, context, { filename: "AdminLogic.js" });
   vm.runInContext(masterSource, context, { filename: "MasterTable.gs" });
+  context.__logs = logs;
   return context;
 }
 
@@ -185,6 +199,44 @@ test("move and insertion plans retain real spreadsheet row coordinates", async (
   assert.equal(move.finalRow, 4);
   assert.deepEqual(Array.from(move.rows, (value) => value[0]), ["9", "10", "10"]);
   assert.equal(context.planAdminMasterInsertion_(sheet, "1"), 3);
+});
+
+test("approval order repair stably sorts valid kkj rows in contiguous runs", async () => {
+  const sheet = new Sheet([
+    ["level", "title", "artist", "md5", "comment"],
+    row("10", 1),
+    row("0", 2),
+    row("0", 3),
+    row("?", 4),
+    row("10", 5),
+    row("★★4?", 6),
+  ]);
+  const context = await loadMasterTable(sheet);
+  const state = context.ensureAdminMasterOrderForApply_(sheet, {});
+  assert.deepEqual(sheet.rows.slice(1).map((value) => value[0]), ["0", "0", "10", "10", "★★4?", "?"]);
+  assert.deepEqual(
+    sheet.rows.slice(1).filter((value) => value[0] === "10").map((value) => value[3]),
+    [md5(1), md5(5)],
+  );
+  assert.equal(state.analysis.ok, true);
+  assert.equal(state.orderRepairMoveCount, 3);
+  assert.equal(sheet.moves.length, 3);
+  assert.equal(context.__logs.length, 1);
+  assert.equal(context.__logs[0].action, "repair_table_order");
+  assert.equal(context.__logs[0].result, "success");
+});
+
+test("approval order repair refuses unknown levels and duplicate MD5 without moving rows", async () => {
+  for (const [dataRows, code] of [
+    [[row("10", 1), row("hst1", 2)], "TABLE_ORDER_INVALID"],
+    [[row("10", 1), { ...row("0", 2), 3: md5(1) }], "CHART_DUPLICATED"],
+  ]) {
+    const normalizedRows = dataRows.map((value) => Array.isArray(value) ? value : Object.assign([], value));
+    const sheet = new Sheet([["level", "title", "artist", "md5", "comment"], ...normalizedRows]);
+    const context = await loadMasterTable(sheet);
+    assert.throws(() => context.ensureAdminMasterOrderForApply_(sheet, {}), (error) => error.code === code);
+    assert.equal(sheet.moves.length, 0);
+  }
 });
 
 test("duplicate audit reports real rows and never treats the header as data", async () => {

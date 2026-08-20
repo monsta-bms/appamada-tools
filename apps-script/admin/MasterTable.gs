@@ -151,9 +151,10 @@ function restoreAdminFilter_(sheet, snapshot) {
   });
 }
 
-function moveAdminMasterRow_(sheet, sourceRow, finalRow) {
-  if (sourceRow === finalRow) return;
-  var destination = AppamadaAdminLogic.moveRowsDestinationIndex(sourceRow, finalRow, 1);
+function moveAdminMasterRows_(sheet, sourceRow, finalRow, rowCount) {
+  var count = Number(rowCount || 1);
+  if (sourceRow === finalRow || count < 1) return;
+  var destination = AppamadaAdminLogic.moveRowsDestinationIndex(sourceRow, finalRow, count);
   var frozenRows = sheet.getFrozenRows();
   var temporarilyUnfrozen = AppamadaAdminLogic.moveTouchesFrozenRows(
     sourceRow,
@@ -169,7 +170,7 @@ function moveAdminMasterRow_(sheet, sourceRow, finalRow) {
       filterRemoved = true;
     }
     if (temporarilyUnfrozen) sheet.setFrozenRows(0);
-    sheet.moveRows(sheet.getRange(sourceRow, 1, 1, 1), destination);
+    sheet.moveRows(sheet.getRange(sourceRow, 1, count, 1), destination);
   } catch (error) {
     operationError = error;
   } finally {
@@ -195,6 +196,61 @@ function moveAdminMasterRow_(sheet, sourceRow, finalRow) {
       "エラー",
     );
   }
+}
+
+function moveAdminMasterRow_(sheet, sourceRow, finalRow) {
+  moveAdminMasterRows_(sheet, sourceRow, finalRow, 1);
+}
+
+function ensureAdminMasterOrderForApply_(sheet, context) {
+  if (context && context.masterState) return context.masterState;
+  var rows = readAdminMasterRows_(sheet);
+  var analysis = AppamadaAdminLogic.analyzeTableOrder(rows, 2);
+  if (analysis.ok) {
+    var validState = { rows: rows, analysis: analysis };
+    if (context) context.masterState = validState;
+    return validState;
+  }
+  if (analysis.code !== "TABLE_ORDER_INVALID") {
+    throwAdminError_(analysis.code, analysis.detail, "要確認");
+  }
+
+  var plan = AppamadaAdminLogic.planStableTableSort(rows, 2);
+  if (!plan.ok) throwAdminError_(plan.code, plan.detail, "要確認");
+  if (!plan.changed) throwAdminError_(analysis.code, analysis.detail, "要確認");
+
+  var currentRows = rows.map(function (row) { return row.slice(); });
+  var cursor = 0;
+  var moveCount = 0;
+  AppamadaAdminLogic.PUBLISH_LEVEL_ORDER.forEach(function (level) {
+    while (cursor < currentRows.length) {
+      var sourceIndex = -1;
+      for (var index = cursor; index < currentRows.length; index += 1) {
+        if (String(currentRows[index][0]) === level) {
+          sourceIndex = index;
+          break;
+        }
+      }
+      if (sourceIndex === -1) break;
+      var runLength = 1;
+      while (
+        sourceIndex + runLength < currentRows.length &&
+        String(currentRows[sourceIndex + runLength][0]) === level
+      ) runLength += 1;
+      if (sourceIndex !== cursor) {
+        moveAdminMasterRows_(sheet, sourceIndex + 2, cursor + 2, runLength);
+        var movedRows = currentRows.splice(sourceIndex, runLength);
+        currentRows = currentRows.slice(0, cursor).concat(movedRows, currentRows.slice(cursor));
+        moveCount += 1;
+      }
+      cursor += runLength;
+    }
+  });
+
+  var repairedState = refreshAdminMasterState_(sheet, context);
+  logAdminDiagnostic_({ action: "repair_table_order", result: "success" });
+  repairedState.orderRepairMoveCount = moveCount;
+  return repairedState;
 }
 
 function planAdminMasterMove_(sheet, sourceRow, targetLevel, rows) {

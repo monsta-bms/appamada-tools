@@ -8,6 +8,7 @@ function processAdminApplicationRowLocked_(rowNumber, settings, context) {
     }
     validateAdminApplication_(application, settings.allowError);
     if (!context.masterSheet) context.masterSheet = getAdminMasterSheet_(context.spreadsheet);
+    ensureAdminMasterOrderForApply_(context.masterSheet, context);
     var action = application.record.applicationType === "change"
       ? "apply_change"
       : application.record.applicationType === "delete" ? "apply_delete" : "apply_new";

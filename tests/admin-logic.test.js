@@ -37,8 +37,11 @@ function record(overrides = {}) {
 
 test("publish order preserves the current kkj/public JSON special ordering", async () => {
   const logic = await loadLogic();
+  assert.deepEqual(Array.from(logic.PUBLISH_LEVEL_ORDER).slice(10, 22), [
+    "10-", "10", "10+", "11-", "11", "11+", "12-", "12", "12+", "13-", "13", "13+",
+  ]);
   assert.deepEqual(Array.from(logic.PUBLISH_LEVEL_ORDER).slice(-6), [
-    "★★4?", "★★5?", "★★6?", "★★7?", "?", "隔離",
+    "★★4?", "★★5?", "★★6?", "★★7?", "隔離", "?",
   ]);
 });
 
@@ -71,9 +74,38 @@ test("table order rejects internal blanks and duplicate MD5 values", async () =>
   assert.equal(logic.analyzeTableOrder(duplicate, 1).code, "CHART_DUPLICATED");
 });
 
-test("table order accepts the required special block order", async () => {
+test("table order accepts the existing Spreadsheet sorter special block order", async () => {
   const logic = await loadLogic();
-  assert.equal(logic.analyzeTableOrder(rows(["16", "★★4?", "★★5?", "★★6?", "★★7?", "?", "隔離"]), 1).ok, true);
+  assert.equal(logic.analyzeTableOrder(rows(["16", "★★4?", "★★5?", "★★6?", "★★7?", "隔離", "?"]), 1).ok, true);
+});
+
+test("stable table sort repairs level order while preserving order within each level", async () => {
+  const logic = await loadLogic();
+  const table = rows(["10", "0", "10", "?", "0", "★★4?"]);
+  const originalMd5ByLevel = Object.fromEntries(
+    ["0", "10", "★★4?", "?"].map((level) => [
+      level,
+      table.filter((row) => row[0] === level).map((row) => row[3]),
+    ]),
+  );
+  const plan = logic.planStableTableSort(table, 2);
+  assert.equal(plan.ok, true);
+  assert.equal(plan.changed, true);
+  assert.deepEqual(Array.from(plan.rows, (row) => row[0]), ["0", "0", "10", "10", "★★4?", "?"]);
+  for (const [level, md5s] of Object.entries(originalMd5ByLevel)) {
+    assert.deepEqual(Array.from(plan.rows.filter((row) => row[0] === level), (row) => row[3]), md5s);
+  }
+  assert.equal(logic.analyzeTableOrder(plan.rows, 2).ok, true);
+});
+
+test("stable table sort refuses structural corruption", async () => {
+  const logic = await loadLogic();
+  const blank = [rows(["0"])[0], ["", "", "", "", ""]];
+  assert.equal(logic.planStableTableSort(blank, 2).code, "TABLE_ORDER_INVALID");
+  assert.equal(logic.planStableTableSort(rows(["hst1"]), 2).code, "TABLE_ORDER_INVALID");
+  const duplicate = rows(["10", "0"]);
+  duplicate[1][3] = duplicate[0][3];
+  assert.equal(logic.planStableTableSort(duplicate, 2).code, "CHART_DUPLICATED");
 });
 
 test("insertion uses an existing block end", async () => {
