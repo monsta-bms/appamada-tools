@@ -76,6 +76,7 @@ function processAdminApplicationRows_(rowNumbers, options) {
       applicationSheet: getAdminApplicationSheet_(spreadsheet),
       masterSheet: null,
       masterState: null,
+      deletedState: null,
     };
     var settings = options || {};
     var results = rows.map(function (rowNumber) {

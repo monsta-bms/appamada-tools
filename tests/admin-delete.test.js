@@ -23,7 +23,7 @@ function application(overrides = {}) {
   };
 }
 
-async function loadDeleteHarness({ currentLevel = "隔離", matches = [12], failAfterDelete = false } = {}) {
+async function loadDeleteHarness({ currentLevel = "隔離", matches = [12], failAfterDelete = false, failAfterArchive = false } = {}) {
   const calls = [];
   const masterSheet = {};
   const rows = Array.from({ length: Math.max(0, ...matches.map((row) => row - 1)) }, (_, index) => [
@@ -49,7 +49,12 @@ async function loadDeleteHarness({ currentLevel = "隔離", matches = [12], fail
     },
     maybeInjectAdminFault_(point, requestId) {
       calls.push(["fault", point, requestId]);
+      if (failAfterArchive && point === "FAIL_AFTER_DELETED_ARCHIVE") throw new Error("archive injected");
       if (failAfterDelete && point === "FAIL_AFTER_MASTER_DELETE") throw new Error("injected");
+    },
+    archiveAdminDeletedChart_(spreadsheet, row) {
+      calls.push(["archive", spreadsheet, row]);
+      return { rowNumber: 8, alreadyArchived: false };
     },
     deleteAdminMasterRow_(sheet, row) { calls.push(["delete", sheet, row]); },
     finalizeAdminApplication_(spreadsheet, sheet, row, memo) {
@@ -66,11 +71,17 @@ test("approved delete records a recovery plan before deleting the unique matchin
   const spreadsheet = { id: "spreadsheet" };
   const applicationSheet = { name: "申請一覧" };
   const result = context.applyAdminDelete_(spreadsheet, applicationSheet, masterSheet, application());
-  assert.deepEqual({ ...result }, { ok: true, deletedRow: 12 });
+  assert.deepEqual({ ...result }, {
+    ok: true,
+    deletedRow: 12,
+    deletedArchiveRow: 8,
+    alreadyArchived: false,
+  });
   const planIndex = calls.findIndex(([name]) => name === "plan");
+  const archiveIndex = calls.findIndex(([name]) => name === "archive");
   const deleteIndex = calls.findIndex(([name]) => name === "delete");
   const finalizeIndex = calls.findIndex(([name]) => name === "finalize");
-  assert.equal(planIndex < deleteIndex && deleteIndex < finalizeIndex, true);
+  assert.equal(planIndex < archiveIndex && archiveIndex < deleteIndex && deleteIndex < finalizeIndex, true);
   assert.match(calls[planIndex][4].memo, new RegExp(`^DELETE_PLANNED request_id=${REQUEST_ID} md5=${MD5} level=隔離$`));
   assert.match(calls[finalizeIndex][4], /kkj 12行目 隔離 を削除/);
 });
@@ -100,6 +111,7 @@ test("scheduled recovery finalizes a planned delete when the master row is alrea
     readAdminApplication_() { return request; },
     validateAdminApplication_() { calls.push("validate"); },
     findAdminMasterRowsByMd5_() { return []; },
+    assertAdminDeletedChartArchived_() { calls.push("assertArchived"); },
     assertAdminTableOrder_() { calls.push("assertOrder"); },
     finalizeAdminApplication_(spreadsheet, sheet, row, memo) {
       calls.push(["finalize", row, memo]);
@@ -121,6 +133,7 @@ test("scheduled recovery finalizes a planned delete when the master row is alrea
   assert.deepEqual({ ...result }, { recovered: 1, failed: 0, ignored: 0 });
   assert.deepEqual(calls, [
     "validate",
+    "assertArchived",
     "assertOrder",
     ["finalize", 2, "kkjから削除済み（復旧）"],
     ["log", "recover_delete", "success"],
@@ -133,4 +146,14 @@ test("an interruption after row deletion preserves the recovery marker", async (
     () => context.applyAdminDelete_({}, {}, masterSheet, application()),
     (error) => error.message === "injected" && error.preserveDeletePlan === true,
   );
+});
+
+test("an interruption after deleted-sheet archival preserves the plan and does not delete kkj", async () => {
+  const { context, calls, masterSheet } = await loadDeleteHarness({ failAfterArchive: true });
+  assert.throws(
+    () => context.applyAdminDelete_({}, {}, masterSheet, application()),
+    (error) => error.message === "archive injected" && error.preserveDeletePlan === true,
+  );
+  assert.equal(calls.some(([name]) => name === "archive"), true);
+  assert.equal(calls.some(([name]) => name === "delete"), false);
 });

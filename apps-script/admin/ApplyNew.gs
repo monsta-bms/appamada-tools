@@ -1,4 +1,5 @@
 function applyAdminNew_(spreadsheet, applicationSheet, masterSheet, application, context) {
+  assertAdminChartNotDeleted_(spreadsheet, application.record.md5, context);
   var state = getAdminMasterState_(masterSheet, context);
   var matches = findAdminMasterIndexesByMd5_(state.rows, application.record.md5);
   if (matches.length > 1) throwAdminError_("CHART_DUPLICATED", "このMD5はkkjで重複しています", "要確認");

@@ -1,5 +1,6 @@
 var PHASE3_BACKUP_MASTER = "__phase3_backup_kkj";
 var PHASE3_BACKUP_APPLICATIONS = "__phase3_backup_applications";
+var PHASE3_BACKUP_DELETED = "__phase3_backup_deleted";
 
 function assertPhase3IntegrationTestMode_() {
   var spreadsheet = getAdminSpreadsheet_();
@@ -51,6 +52,11 @@ function phase3SeedMaster_(spreadsheet, sheet) {
 
 function phase3ResetApplications_(sheet) {
   if (sheet.getMaxRows() > 1) sheet.getRange(2, 1, sheet.getMaxRows() - 1, 19).clearContent();
+}
+
+function phase3ResetDeleted_(sheet) {
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, 5).setValues([["level", "title", "artist", "md5", "comment"]]);
 }
 
 function phase3AppendApplication_(spreadsheet, sheet, number, options) {
@@ -118,22 +124,28 @@ function phase3FindMasterRow_(sheet, md5) {
 function phase3BackupSheets_(spreadsheet) {
   phase3Assert_(!spreadsheet.getSheetByName(PHASE3_BACKUP_MASTER), "stale kkj backup exists");
   phase3Assert_(!spreadsheet.getSheetByName(PHASE3_BACKUP_APPLICATIONS), "stale application backup exists");
+  phase3Assert_(!spreadsheet.getSheetByName(PHASE3_BACKUP_DELETED), "stale deleted backup exists");
   getAdminMasterSheet_(spreadsheet).copyTo(spreadsheet).setName(PHASE3_BACKUP_MASTER);
   getAdminApplicationSheet_(spreadsheet).copyTo(spreadsheet).setName(PHASE3_BACKUP_APPLICATIONS);
+  getAdminDeletedSheet_(spreadsheet).copyTo(spreadsheet).setName(PHASE3_BACKUP_DELETED);
 }
 
 function restorePhase3IntegrationBackup() {
   var spreadsheet = assertPhase3IntegrationTestMode_();
   var masterBackup = spreadsheet.getSheetByName(PHASE3_BACKUP_MASTER);
   var applicationBackup = spreadsheet.getSheetByName(PHASE3_BACKUP_APPLICATIONS);
-  if (!masterBackup && !applicationBackup) return { restored: false };
-  phase3Assert_(masterBackup && applicationBackup, "both backup sheets are required");
+  var deletedBackup = spreadsheet.getSheetByName(PHASE3_BACKUP_DELETED);
+  if (!masterBackup && !applicationBackup && !deletedBackup) return { restored: false };
+  phase3Assert_(masterBackup && applicationBackup && deletedBackup, "all backup sheets are required");
   var master = spreadsheet.getSheetByName(ADMIN_CONFIG.masterSheetName);
   var applications = spreadsheet.getSheetByName(ADMIN_CONFIG.applicationSheetName);
+  var deleted = spreadsheet.getSheetByName(ADMIN_CONFIG.deletedSheetName);
   if (master) spreadsheet.deleteSheet(master);
   if (applications) spreadsheet.deleteSheet(applications);
+  if (deleted) spreadsheet.deleteSheet(deleted);
   masterBackup.setName(ADMIN_CONFIG.masterSheetName);
   applicationBackup.setName(ADMIN_CONFIG.applicationSheetName);
+  deletedBackup.setName(ADMIN_CONFIG.deletedSheetName);
   return { restored: true };
 }
 
@@ -147,10 +159,12 @@ function runPhase3IntegrationSuite() {
   try {
     var master = getAdminMasterSheet_(spreadsheet);
     var applications = getAdminApplicationSheet_(spreadsheet);
+    var deleted = getAdminDeletedSheet_(spreadsheet);
     var initialFilter = master.getFilter();
     var initialFilterRange = initialFilter ? initialFilter.getRange().getA1Notation() : "";
     phase3SeedMaster_(spreadsheet, master);
     phase3ResetApplications_(applications);
+    phase3ResetDeleted_(deleted);
     var seedOrder = assertAdminTableOrder_(master);
     phase3Assert_(seedOrder.md5Count === 17, "seed audit: " + JSON.stringify(seedOrder));
 
@@ -215,6 +229,24 @@ function runPhase3IntegrationSuite() {
       phase3ApplyAndAssert_(applications, newRow, "反映済", "");
     }
     results.push("new_existing_block", "new_missing_block", "new_first", "new_last", "new_special");
+
+    var deletedMd5 = phase3Md5_(1150);
+    phase3WriteValuesRaw_(spreadsheet, deleted, "A2:E2", [["0", "Deleted Title", "Deleted Artist", deletedMd5, "deleted"]]);
+    var deletedNew = phase3AppendApplication_(spreadsheet, applications, 16, {
+      type: "new", targetLevel: "10", md5: deletedMd5,
+    });
+    phase3ApplyAndAssert_(applications, deletedNew, "削除済重複", "DELETED_CHART_DUPLICATE");
+    phase3Assert_(findAdminMasterRowsByMd5_(master, deletedMd5).length === 0, "deleted new was not added");
+    results.push("new_deleted_duplicate");
+
+    var deleteMd5 = phase3Md5_(13);
+    var deleteRow = phase3AppendApplication_(spreadsheet, applications, 17, {
+      type: "delete", md5: deleteMd5, originalLevel: "16", targetLevel: "削除",
+    });
+    phase3ApplyAndAssert_(applications, deleteRow, "反映済", "");
+    phase3Assert_(findAdminMasterRowsByMd5_(master, deleteMd5).length === 0, "delete removed kkj row");
+    phase3Assert_(getAdminDeletedState_(spreadsheet).md5Rows[deleteMd5].length === 1, "delete archived row");
+    results.push("delete_archive");
 
     var duplicateMd5 = phase3Md5_(1200);
     var duplicateA = phase3AppendApplication_(spreadsheet, applications, 20, { type: "new", targetLevel: "11", md5: duplicateMd5 });
@@ -324,7 +356,7 @@ function runPhase3IntegrationSuite() {
     console.log(JSON.stringify({ action: "phase3_integration_suite", result: summary }));
     return summary;
   } finally {
-    ["TEST_FAIL_AFTER_MASTER_WRITE", "TEST_FAIL_AFTER_APPLICATION_UPDATE", "TEST_FAIL_AFTER_BLANK_INSERT"].forEach(function (name) {
+    ["TEST_FAIL_AFTER_MASTER_WRITE", "TEST_FAIL_AFTER_APPLICATION_UPDATE", "TEST_FAIL_AFTER_BLANK_INSERT", "TEST_FAIL_AFTER_DELETED_ARCHIVE"].forEach(function (name) {
       properties.deleteProperty(name);
     });
     if (previousAdminApplyEnabled === null) properties.deleteProperty("ADMIN_APPLY_ENABLED");

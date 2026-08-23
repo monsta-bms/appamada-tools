@@ -13,6 +13,8 @@ Apps Script sourceは`apps-script/api`にあります。
 - `Submit.gs`: lock内の冪等性・検査・保存フロー
 - `RateLimit.gs`: 10分bucketのbest-effort制限
 - `SheetStore.gs`: A:S schema、明示setup、RAW append
+
+new投稿は保存前に同一Spreadsheetの「削除済」D列とmd5を照合します。一致した申請も記録は残しますが、M列は初期状態から「削除済重複」とし、管理反映側でもkkj追加直前に再照合します。「削除済」のA:E headerは`level,title,artist,md5,comment`です。
 - `Logging.gs`: 個人情報を増やさない構造化診断ログ
 
 ## Script Properties

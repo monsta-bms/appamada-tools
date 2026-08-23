@@ -10,13 +10,14 @@ installable onEdit triggerは「申請一覧」のA列と交差する編集だ�
 
 kkjは処理開始時に全体を一度検証します。行データが正当で難易度の並びだけが崩れている場合は、公開順へ自動整列してから反映を続行します。各反映後に再検証した結果を次の行で再利用します。MD5検索は同じin-memoryデータで行い、同一行処理中の重複した全表読込とTextFinder呼出しを避けます。申請結果の更新はA:S全体ではなくM:SだけをRAW更新します。
 
-状態は次の5種類だけです。
+状態は次の6種類だけです。
 
 - `未処理`: ○反映前
 - `反映済`: kkj反映と申請一覧更新が完了
 - `却下`: 管理者が手動設定。自動処理・recovery対象外
 - `要確認`: stale、入力、表構造、競合など人間判断が必要
 - `エラー`: lockやGoogle serviceなど一時的な技術障害
+- `削除済重複`: new申請のmd5が「削除済」に登録済みのため反映せず停止
 
 ## change
 
@@ -40,6 +41,14 @@ E列には○反映日のAsia/Tokyo日付を`yyyy/M/d`形式で先頭へ追加�
 
 `=`, `+`, `-`, `@`で始まる文字列も式として評価しません。対象level blockがなければ現在の公開順で次のblock直前へ挿入します。同じMD5が先に追加済みなら`CHART_ALREADY_EXISTS` / `要確認`です。
 新規行を既存basic filter範囲内へ挿入する場合は、filter範囲と列条件を退避し、挿入後も元の範囲・条件を復元します。
+
+newはkkj挿入前に「削除済」D列のmd5と照合します。一致時はkkjへ追加せず、申請一覧M列を「削除済重複」とします。
+
+## deleteと削除済譜面
+
+「削除済」はA:Eを`level, title, artist, md5, comment`とします。delete反映時はkkjの対象A:Eを「削除済」最終行の次へRAW追記し、その成功後にkkj行を削除します。中断後の再実行ではmd5を照合し、既に保存済みなら二重追記しません。kkj削除後の復旧は「削除済」にmd5があることを確認してから申請をfinalizeします。
+
+難易度表補助の「○付き行をkkjへ反映」も「削除済」のmd5を先に照合します。一致行はkkjへ反映せず仮置きに残し、G列へ「削除済重複」を記録します。
 
 ## 表順序
 
@@ -75,7 +84,7 @@ level blockの分断や順序逆転だけであれば、○反映時に既存Spr
 - newがblank row: A:EをRAW書込みしてfinalize
 - その他の部分データ: `RECOVERY_FAILED` / `要確認`、上書き・metadata削除なし
 
-テスト専用Script Property `TEST_FAIL_AFTER_MASTER_WRITE`、`TEST_FAIL_AFTER_APPLICATION_UPDATE`、`TEST_FAIL_AFTER_BLANK_INSERT`へ`true`または対象request_idを設定すると中断を再現できます。試験後は必ず削除します。未設定時は通常処理へ影響しません。
+テスト専用Script Property `TEST_FAIL_AFTER_MASTER_WRITE`、`TEST_FAIL_AFTER_APPLICATION_UPDATE`、`TEST_FAIL_AFTER_BLANK_INSERT`、`TEST_FAIL_AFTER_DELETED_ARCHIVE`へ`true`または対象request_idを設定すると中断を再現できます。試験後は必ず削除します。未設定時は通常処理へ影響しません。
 
 ## retry
 

@@ -37,6 +37,7 @@ test("new comments use the requested slash date prefix", async () => {
 test("approved new applications persist the dated comment and recovery value", async () => {
   const calls = [];
   const context = vm.createContext({
+    assertAdminChartNotDeleted_() { calls.push("deleted-check"); },
     getAdminMasterState_() { return { rows: [] }; },
     findAdminMasterIndexesByMd5_() { return []; },
     planAdminMasterInsertion_() { return 2; },
@@ -64,12 +65,32 @@ test("approved new applications persist the dated comment and recovery value", a
   vm.runInContext(source, context, { filename: "ApplyNew.gs" });
   const result = context.applyAdminNew_({}, {}, {}, application(), {});
   assert.equal(result.ok, true);
+  assert.equal(calls[0], "deleted-check");
   assert.deepEqual({ ...calls.find(([name]) => name === "metadata")[1] }, {
     new_comment_date: "2026/8/15",
   });
   assert.deepEqual(Array.from(calls.find(([name]) => name === "write")[1]), [
     "13-", "New Title", "New Artist", MD5, "2026/8/15 差分URL:XXXX",
   ]);
+});
+
+test("new applications reject a deleted MD5 before changing kkj", async () => {
+  const calls = [];
+  const context = vm.createContext({
+    assertAdminChartNotDeleted_() {
+      const error = new Error("削除済重複");
+      Object.assign(error, { code: "DELETED_CHART_DUPLICATE", state: "削除済重複" });
+      throw error;
+    },
+    getAdminMasterState_() { calls.push("master-read"); return { rows: [] }; },
+  });
+  const source = await readFile(new URL("../apps-script/admin/ApplyNew.gs", import.meta.url), "utf8");
+  vm.runInContext(source, context, { filename: "ApplyNew.gs" });
+  assert.throws(
+    () => context.applyAdminNew_({}, {}, {}, application(), {}),
+    (error) => error.code === "DELETED_CHART_DUPLICATE" && error.state === "削除済重複",
+  );
+  assert.deepEqual(calls, []);
 });
 
 test("new recovery reuses the original dated comment from metadata", async () => {

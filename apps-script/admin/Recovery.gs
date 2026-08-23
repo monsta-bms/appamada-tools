@@ -117,6 +117,7 @@ function recoverAdminDeletePlans_(spreadsheet, applicationSheet, masterSheet) {
         throwAdminError_("CHART_DUPLICATED", "このMD5はkkjで重複しています", "要確認");
       }
       if (matches.length === 0) {
+        assertAdminDeletedChartArchived_(spreadsheet, application.record.md5);
         assertAdminTableOrder_(masterSheet);
         finalizeAdminApplication_(
           spreadsheet,

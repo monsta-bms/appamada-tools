@@ -8,6 +8,8 @@ export const APPLICATION_HEADERS = [
   "状態", "反映日時", "処理メモ", "request_id", "client_version", "エラーコード", "再試行回数",
 ];
 
+const DELETED_HEADERS = ["level", "title", "artist", "md5", "comment"];
+
 const SOURCE_FILES = [
   "Config.gs",
   "Validation.gs",
@@ -182,6 +184,7 @@ function textOutput(content) {
 
 export async function createAppsScriptHarness({
   kkjRows = [],
+  deletedRows = [],
   applicationHeaders = APPLICATION_HEADERS,
   includeApplicationSheet = true,
   properties = {},
@@ -189,10 +192,11 @@ export async function createAppsScriptHarness({
   writeFails = false,
 } = {}) {
   const kkj = new FakeSheet("kkj", kkjRows);
+  const deleted = new FakeSheet("削除済", [DELETED_HEADERS, ...deletedRows]);
   const application = includeApplicationSheet
     ? new FakeSheet("申請一覧", [applicationHeaders])
     : null;
-  const spreadsheet = new FakeSpreadsheet([kkj, ...(application ? [application] : [])]);
+  const spreadsheet = new FakeSpreadsheet([kkj, deleted, ...(application ? [application] : [])]);
   const cache = new FakeCache();
   const scriptProperties = new Map(Object.entries({
     SPREADSHEET_ID: "test-spreadsheet",

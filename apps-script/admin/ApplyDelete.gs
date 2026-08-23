@@ -19,12 +19,18 @@ function validateAdminDeleteTarget_(masterSheet, application, context) {
       "要確認",
     );
   }
-  return { sourceRow: sourceRow, currentLevel: currentLevel };
+  return {
+    sourceRow: sourceRow,
+    currentLevel: currentLevel,
+    masterRow: state.rows[matches[0]].slice(0, 5),
+  };
 }
 
 function completeAdminDelete_(spreadsheet, applicationSheet, masterSheet, application, target, recovered, context) {
-  deleteAdminMasterRow_(masterSheet, target.sourceRow);
   try {
+    var archive = archiveAdminDeletedChart_(spreadsheet, target.masterRow, context);
+    maybeInjectAdminFault_("FAIL_AFTER_DELETED_ARCHIVE", application.record.requestId);
+    deleteAdminMasterRow_(masterSheet, target.sourceRow);
     maybeInjectAdminFault_("FAIL_AFTER_MASTER_DELETE", application.record.requestId);
     refreshAdminMasterState_(masterSheet, context);
     finalizeAdminApplication_(
@@ -37,7 +43,12 @@ function completeAdminDelete_(spreadsheet, applicationSheet, masterSheet, applic
     error.preserveDeletePlan = true;
     throw error;
   }
-  return { ok: true, deletedRow: target.sourceRow };
+  return {
+    ok: true,
+    deletedRow: target.sourceRow,
+    deletedArchiveRow: archive.rowNumber,
+    alreadyArchived: archive.alreadyArchived,
+  };
 }
 
 function applyAdminDelete_(spreadsheet, applicationSheet, masterSheet, application, context) {

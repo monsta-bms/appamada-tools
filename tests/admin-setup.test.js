@@ -152,3 +152,26 @@ test("application outcomes update only M:S with RAW input", async () => {
   assert.equal(rawWrites[0].range, "'申請一覧'!M2:S2");
   assert.equal(rawWrites[0].options.valueInputOption, "RAW");
 });
+
+test("deleted duplicate failure writes the exact status to column M", async () => {
+  const applicationRow = new Array(19).fill("");
+  applicationRow[12] = "未処理";
+  const sheet = new Sheet("申請一覧", [headers, applicationRow]);
+  const { context } = await loadSetup(sheet);
+  context.AdminApplyError = class AdminApplyError extends Error {
+    constructor(code, message, state) {
+      super(message);
+      this.code = code;
+      this.state = state;
+    }
+  };
+  const error = new context.AdminApplyError(
+    "DELETED_CHART_DUPLICATE",
+    "削除済重複",
+    "削除済重複",
+  );
+  context.markAdminApplicationFailure_(context.getAdminSpreadsheet_(), sheet, 2, error);
+  assert.equal(sheet.rows[1][12], "削除済重複");
+  assert.equal(sheet.rows[1][14], "削除済重複");
+  assert.equal(sheet.rows[1][17], "DELETED_CHART_DUPLICATE");
+});

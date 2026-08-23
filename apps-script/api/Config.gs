@@ -29,6 +29,7 @@ var APPAMADA_ALLOWED_LEVELS = Object.freeze([
 var APPAMADA_DEFAULTS = Object.freeze({
   applicationSheetName: "申請一覧",
   chartSheetName: "kkj",
+  deletedSheetName: "削除済",
   timezone: "Asia/Tokyo",
   userLimit: 60,
   userMd5Limit: 10,
@@ -60,6 +61,7 @@ function getAppamadaConfig_(providedValues) {
     spreadsheetId: spreadsheetId,
     applicationSheetName: APPAMADA_DEFAULTS.applicationSheetName,
     chartSheetName: APPAMADA_DEFAULTS.chartSheetName,
+    deletedSheetName: APPAMADA_DEFAULTS.deletedSheetName,
     timezone: APPAMADA_DEFAULTS.timezone,
     userLimit: positiveIntegerProperty_(values, "USER_LIMIT", APPAMADA_DEFAULTS.userLimit),
     userMd5Limit: positiveIntegerProperty_(

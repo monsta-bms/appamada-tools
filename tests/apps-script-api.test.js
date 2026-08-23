@@ -176,6 +176,16 @@ test("normal new stores parser title and artist", async () => {
   assert.equal(row[8], "");
 });
 
+test("new submission stores 削除済重複 in M when deleted MD5 matches", async () => {
+  const harness = await createAppsScriptHarness({
+    deletedRows: [["0", "Deleted", "Artist", NEW_MD5.toUpperCase(), "old"]],
+  });
+  const result = harness.post(newPayload());
+  assert.equal(result.ok, true);
+  assert.equal(harness.applications().length, 1);
+  assert.equal(harness.applications()[0][12], "削除済重複");
+});
+
 test("13- is accepted as a proposed level", async () => {
   const harness = await createAppsScriptHarness();
   const result = harness.post(newPayload({ proposed_level: "13-" }));

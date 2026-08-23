@@ -7,6 +7,7 @@ var ADMIN_APPLICATION_HEADERS = Object.freeze([
 var ADMIN_CONFIG = Object.freeze({
   applicationSheetName: "申請一覧",
   masterSheetName: "kkj",
+  deletedSheetName: "削除済",
   timezone: "Asia/Tokyo",
   metadataKey: "appamada_apply",
   maxAutomaticRetries: 3,

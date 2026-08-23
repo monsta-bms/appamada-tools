@@ -218,7 +218,9 @@ test("state and retry rules exclude review, rejected, and applied rows", async (
   assert.equal(logic.canProcessState("未処理", false), true);
   assert.equal(logic.canProcessState("エラー", false), false);
   assert.equal(logic.canProcessState("エラー", true), true);
-  for (const state of ["要確認", "却下", "反映済"]) assert.equal(logic.canProcessState(state, true), false);
+  for (const state of ["要確認", "却下", "反映済", "削除済重複"]) {
+    assert.equal(logic.canProcessState(state, true), false);
+  }
   assert.equal(logic.isRetryableError("LOCK_TIMEOUT"), true);
   assert.equal(logic.isRetryableError("GOOGLE_SERVICE_ERROR"), true);
   assert.equal(logic.isRetryableError("STALE_CURRENT_LEVEL"), false);
@@ -233,9 +235,9 @@ test("admin manifest and source tree keep the bound script split by responsibili
   assert.equal(manifest.dependencies.enabledAdvancedServices[0].serviceId, "sheets");
   assert.equal(manifest.webapp, undefined);
   const names = [
-    "Main.gs", "Config.gs", "Validation.gs", "ApplicationSheet.gs", "MasterTable.gs",
+    "Main.gs", "Config.gs", "Validation.gs", "ApplicationSheet.gs", "MasterTable.gs", "DeletedTable.gs",
     "TableOrder.gs", "ApplyChange.gs", "ApplyNew.gs", "ApplyDelete.gs", "Metadata.gs", "Recovery.gs",
-    "AdminMenu.gs", "TriggerSetup.gs", "Logging.gs", "IntegrationTest.gs",
+    "AdminMenu.gs", "TriggerSetup.gs", "Logging.gs", "DifficultyTableHelper.gs", "IntegrationTest.gs",
   ];
   const sources = [];
   for (const name of names) {

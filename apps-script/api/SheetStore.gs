@@ -23,6 +23,31 @@ function getApplicationSheet_(providedConfig, providedSpreadsheet) {
   return sheet;
 }
 
+function getDeletedSheet_(providedConfig, providedSpreadsheet) {
+  var config = providedConfig || getAppamadaConfig_();
+  var spreadsheet = providedSpreadsheet || getSpreadsheet_(config);
+  var sheet = spreadsheet.getSheetByName(config.deletedSheetName);
+  if (!sheet) throwApiError_("SHEET_NOT_FOUND", "Deleted sheet was not found");
+  var expected = ["level", "title", "artist", "md5", "comment"];
+  var actual = sheet.getRange(1, 1, 1, expected.length).getValues()[0];
+  var valid = actual.every(function (value, index) { return String(value) === expected[index]; });
+  if (!valid) throwApiError_("SHEET_SCHEMA_INVALID", "Deleted sheet headers are invalid");
+  return sheet;
+}
+
+function isDeletedChartMd5_(md5, providedConfig, providedSpreadsheet) {
+  var sheet = getDeletedSheet_(providedConfig, providedSpreadsheet);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+  return sheet
+    .getRange(2, 4, lastRow - 1, 1)
+    .createTextFinder(String(md5))
+    .matchEntireCell(true)
+    .matchCase(false)
+    .findAll()
+    .length > 0;
+}
+
 function setupApplicationSheet() {
   var spreadsheet = getSpreadsheet_();
   var sheet = spreadsheet.getSheetByName(APPAMADA_DEFAULTS.applicationSheetName);
@@ -73,7 +98,8 @@ function storedRequestMatches_(row, payload) {
   return payload.application_type !== "new" || (equal(5, payload.title) && equal(6, payload.artist));
 }
 
-function createApplicationRow_(payload, chart, config) {
+function createApplicationRow_(payload, chart, config, options) {
+  var values = options || {};
   var timestamp = Utilities.formatDate(new Date(), config.timezone, "yyyy/MM/dd HH:mm:ss");
   return [
     "",
@@ -88,7 +114,7 @@ function createApplicationRow_(payload, chart, config) {
     payload.proposed_level,
     payload.comment,
     payload.ir_url,
-    "未処理",
+    values.deletedDuplicate ? "削除済重複" : "未処理",
     "",
     "",
     payload.request_id,

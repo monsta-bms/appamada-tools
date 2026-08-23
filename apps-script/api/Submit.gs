@@ -45,7 +45,11 @@ function submitApplication_(rawPayload) {
       chart = null;
     }
 
-    var row = createApplicationRow_(payload, chart, config);
+    var deletedDuplicate = payload.application_type === "new" &&
+      isDeletedChartMd5_(payload.md5, config, spreadsheet);
+    var row = createApplicationRow_(payload, chart, config, {
+      deletedDuplicate: deletedDuplicate,
+    });
     appendApplicationRowRaw_(applicationSheet, row, config);
     return { ok: true, request_id: payload.request_id, deduplicated: false };
   } finally {
