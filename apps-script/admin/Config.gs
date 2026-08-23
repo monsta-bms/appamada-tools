@@ -54,7 +54,7 @@ function formatAdminNewComment_(comment, datePrefix) {
 }
 
 function adminNewCommentDate_() {
-  return Utilities.formatDate(new Date(), ADMIN_CONFIG.timezone, "yyyy/M/d");
+  return Utilities.formatDate(new Date(), ADMIN_CONFIG.timezone, "yyyy/MM/dd");
 }
 
 function adminNewComment_(comment) {

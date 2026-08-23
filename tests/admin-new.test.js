@@ -24,14 +24,14 @@ function application(comment = "差分URL:XXXX") {
 
 test("new comments use the requested slash date prefix", async () => {
   const context = vm.createContext({
-    Utilities: { formatDate: () => "2026/8/15" },
+    Utilities: { formatDate: () => "2026/08/15" },
     PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
     AppamadaAdminLogic: { failureState: () => "エラー" },
   });
   const source = await readFile(new URL("../apps-script/admin/Config.gs", import.meta.url), "utf8");
   vm.runInContext(source, context, { filename: "Config.gs" });
-  assert.equal(context.adminNewComment_("差分URL:XXXX"), "2026/8/15 差分URL:XXXX");
-  assert.equal(context.adminNewComment_(""), "2026/8/15");
+  assert.equal(context.adminNewComment_("差分URL:XXXX"), "2026/08/15 差分URL:XXXX");
+  assert.equal(context.adminNewComment_(""), "2026/08/15");
 });
 
 test("approved new applications persist the dated comment and recovery value", async () => {
@@ -41,7 +41,7 @@ test("approved new applications persist the dated comment and recovery value", a
     getAdminMasterState_() { return { rows: [] }; },
     findAdminMasterIndexesByMd5_() { return []; },
     planAdminMasterInsertion_() { return 2; },
-    adminNewCommentDate_() { return "2026/8/15"; },
+    adminNewCommentDate_() { return "2026/08/15"; },
     formatAdminNewComment_(comment, date) { return `${date} ${comment}`; },
     insertAdminMasterBlankRow_() { calls.push("insert"); },
     addAdminPlannedMetadata_(sheet, row, request, details) {
@@ -67,10 +67,10 @@ test("approved new applications persist the dated comment and recovery value", a
   assert.equal(result.ok, true);
   assert.equal(calls[0], "deleted-check");
   assert.deepEqual({ ...calls.find(([name]) => name === "metadata")[1] }, {
-    new_comment_date: "2026/8/15",
+    new_comment_date: "2026/08/15",
   });
   assert.deepEqual(Array.from(calls.find(([name]) => name === "write")[1]), [
-    "13-", "New Title", "New Artist", MD5, "2026/8/15 差分URL:XXXX",
+    "13-", "New Title", "New Artist", MD5, "2026/08/15 差分URL:XXXX",
   ]);
 });
 
@@ -120,9 +120,9 @@ test("new recovery reuses the original dated comment from metadata", async () =>
     masterSheet,
     application(),
     metadata,
-    { new_comment_date: "2026/8/15" },
+    { new_comment_date: "2026/08/15" },
   );
   assert.deepEqual(Array.from(writes[0]), [
-    "13-", "New Title", "New Artist", MD5, "2026/8/15 差分URL:XXXX",
+    "13-", "New Title", "New Artist", MD5, "2026/08/15 差分URL:XXXX",
   ]);
 });

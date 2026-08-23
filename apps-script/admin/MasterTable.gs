@@ -57,6 +57,7 @@ function findAdminMasterRowsByMd5_(sheet, md5) {
 function writeAdminMasterRowRaw_(spreadsheet, sheet, rowNumber, row) {
   var range = "'" + sheet.getName().replace(/'/g, "''") + "'!A" + rowNumber + ":E" + rowNumber;
   try {
+    sheet.getRange(rowNumber, 5).setNumberFormat("@");
     Sheets.Spreadsheets.Values.update(
       { values: [row] },
       spreadsheet.getId(),

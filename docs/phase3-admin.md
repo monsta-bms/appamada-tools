@@ -34,10 +34,10 @@ kkj commentへ`yyyy.M.d 旧→新`を` / `区切りで追記します。同じ�
 A:Eへ次の5値だけをSheets Advanced Serviceの`RAW`で書きます。
 
 ```text
-level, title, artist, md5, "yyyy/M/d 申請コメント"
+level, title, artist, md5, "yyyy/MM/dd 申請コメント"
 ```
 
-E列には○反映日のAsia/Tokyo日付を`yyyy/M/d`形式で先頭へ追加し、その後ろへ申請一覧K列のコメントを半角スペース区切りで転記します。例: `2026/8/15 差分URL:XXXX`。コメントが空欄の場合は日付だけを保存します。この処理はnewだけが対象で、changeの履歴追記とdeleteには適用しません。
+E列には○反映日のAsia/Tokyo日付を`yyyy/MM/dd`形式で先頭へ追加し、その後ろへ申請一覧K列のコメントを半角スペース区切りで転記します。例: `2026/08/15 差分URL:XXXX`。コメントが空欄の場合は日付だけを文字列として保存します。この処理はnewだけが対象で、changeの履歴追記とdeleteには適用しません。
 
 `=`, `+`, `-`, `@`で始まる文字列も式として評価しません。対象level blockがなければ現在の公開順で次のblock直前へ挿入します。同じMD5が先に追加済みなら`CHART_ALREADY_EXISTS` / `要確認`です。
 新規行を既存basic filter範囲内へ挿入する場合は、filter範囲と列条件を退避し、挿入後も元の範囲・条件を復元します。

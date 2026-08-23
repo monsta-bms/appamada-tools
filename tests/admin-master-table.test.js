@@ -54,6 +54,16 @@ class Range {
     this.sheet.filter = new BasicFilter(this.sheet, this, new Map());
     return this.sheet.filter;
   }
+  setNumberFormat(value) {
+    this.sheet.numberFormats.push({
+      row: this.startRow,
+      column: this.startColumn,
+      rowCount: this.rowCount,
+      columnCount: this.columnCount,
+      value,
+    });
+    return this;
+  }
 }
 
 class BasicFilter {
@@ -82,6 +92,7 @@ class Sheet {
     this.deletions = [];
     this.moves = [];
     this.frozenRows = 1;
+    this.numberFormats = [];
   }
 
   getLastRow() { return this.rows.length; }
@@ -136,8 +147,12 @@ class Sheet {
 async function loadMasterTable(sheet) {
   const logicSource = await readFile(new URL("../apps-script/admin/AdminLogic.js", import.meta.url), "utf8");
   const masterSource = await readFile(new URL("../apps-script/admin/MasterTable.gs", import.meta.url), "utf8");
-  const spreadsheet = { getSheetByName() { return sheet; } };
+  const spreadsheet = {
+    getId() { return "test-spreadsheet"; },
+    getSheetByName() { return sheet; },
+  };
   const logs = [];
+  const writes = [];
   const context = vm.createContext({
     ADMIN_CONFIG: Object.freeze({ masterSheetName: "kkj" }),
     getAdminSpreadsheet_() { return spreadsheet; },
@@ -147,12 +162,45 @@ async function loadMasterTable(sheet) {
       throw error;
     },
     logAdminDiagnostic_(entry) { logs.push(entry); },
+    Sheets: {
+      Spreadsheets: {
+        Values: {
+          update(resource, spreadsheetId, range, options) {
+            writes.push({ resource, spreadsheetId, range, options });
+          },
+        },
+      },
+    },
   });
   vm.runInContext(logicSource, context, { filename: "AdminLogic.js" });
   vm.runInContext(masterSource, context, { filename: "MasterTable.gs" });
   context.__logs = logs;
+  context.__writes = writes;
   return context;
 }
+
+test("new row comments are forced to plain text before RAW write", async () => {
+  const sheet = new Sheet([["level", "title", "artist", "md5", "comment"]]);
+  sheet.getName = () => "kkj";
+  const context = await loadMasterTable(sheet);
+  const values = ["13", "Title", "", md5(1), "2026/08/18"];
+
+  context.writeAdminMasterRowRaw_({ getId: () => "test-spreadsheet" }, sheet, 2, values);
+
+  assert.deepEqual(sheet.numberFormats, [{
+    row: 2,
+    column: 5,
+    rowCount: 1,
+    columnCount: 1,
+    value: "@",
+  }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.__writes)), [{
+    resource: { values: [values] },
+    spreadsheetId: "test-spreadsheet",
+    range: "'kkj'!A2:E2",
+    options: { valueInputOption: "RAW" },
+  }]);
+});
 
 async function loadRecovery(dataRows) {
   const logicSource = await readFile(new URL("../apps-script/admin/AdminLogic.js", import.meta.url), "utf8");

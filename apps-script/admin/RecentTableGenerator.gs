@@ -1,6 +1,9 @@
 var RECENT_TABLE_HEADERS = Object.freeze(["level", "title", "artist", "md5", "comment"]);
 
 function parseRecentTableDateOrdinal_(comment) {
+  if (comment && typeof comment.getTime === "function" && !isNaN(comment.getTime())) {
+    comment = Utilities.formatDate(comment, ADMIN_CONFIG.timezone, "yyyy/MM/dd");
+  }
   var match = String(comment || "").match(/^(\d{4})[\/.](\d{1,2})[\/.](\d{1,2})(?:\s|$)/);
   if (!match) return null;
   var year = Number(match[1]);
