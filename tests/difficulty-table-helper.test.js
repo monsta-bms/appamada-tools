@@ -54,7 +54,7 @@ test("仮置き reflection blocks deleted MD5 in G while normal rows still move"
   const karioki = new Sheet("仮置き", [
     ["反映", "level", "title", "artist", "md5", "comment", "処理コメント"],
     ["○", "10", "Deleted", "Artist", DELETED_MD5, "old", ""],
-    ["○", "10-", "Normal", "Artist", NORMAL_MD5, "new", ""],
+    ["○", "10-", "Normal", "Artist", NORMAL_MD5, "2026.6.1 new", ""],
   ]);
   const main = new Sheet("kkj", [["level", "title", "artist", "md5", "comment"]]);
   const deleted = new Sheet("削除済", [
@@ -81,6 +81,9 @@ test("仮置き reflection blocks deleted MD5 in G while normal rows still move"
         return { tryLock: () => true, releaseLock() {} };
       },
     },
+    normalizeAdminCommentDates_(value) {
+      return String(value).replace("2026.6.1", "2026/06/01");
+    },
   });
   const source = await readFile(
     new URL("../apps-script/admin/DifficultyTableHelper.gs", import.meta.url),
@@ -92,7 +95,7 @@ test("仮置き reflection blocks deleted MD5 in G while normal rows still move"
   assert.equal(karioki.rows.length, 2);
   assert.equal(karioki.rows[1][0], "○");
   assert.equal(karioki.rows[1][6], "削除済重複");
-  assert.deepEqual(main.rows[1], ["10-", "Normal", "Artist", NORMAL_MD5, "new"]);
+  assert.deepEqual(main.rows[1], ["10-", "Normal", "Artist", NORMAL_MD5, "2026/06/01 new"]);
   assert.equal(deleted.rows.length, 2);
   assert.match(alerts.at(-1)[1], /削除済重複: 1件/);
 });

@@ -102,7 +102,7 @@ function reflectCheckedRowsToMain() {
       mainRow[mainData.headerMap['title']] = cellText_(row[kTitle]).trim();
       mainRow[mainData.headerMap['artist']] = cellText_(row[kArtist]).trim();
       mainRow[mainData.headerMap['md5']] = md5;
-      mainRow[mainData.headerMap['comment']] = cellText_(row[kComment]).trim();
+      mainRow[mainData.headerMap['comment']] = normalizeAdminCommentDates_(row[kComment]).trim();
 
       appendRows.push(mainRow);
       deleteRowNumbers.push(i + 1);

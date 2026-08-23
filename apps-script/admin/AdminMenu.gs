@@ -12,6 +12,7 @@ function addAdminMenu_() {
     .addSeparator()
     .addItem("新規譜面表生成(一週間)", "generateRecentWeekTable")
     .addItem("新規譜面表生成(一ヶ月)", "generateRecentMonthTable")
+    .addItem("kkjコメント日付をYYYY/MM/DDへ統一", "normalizeAdminMasterCommentDates")
     .addToUi();
 }
 

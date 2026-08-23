@@ -19,7 +19,10 @@ function applyAdminChange_(spreadsheet, applicationSheet, masterSheet, applicati
   var plan = planAdminMasterMove_(masterSheet, sourceRow, application.record.targetLevel, state.rows);
   var history = adminHistoryDate_() + " " + currentLevel + "→" + application.record.targetLevel;
   masterRow[0] = application.record.targetLevel;
-  masterRow[4] = AppamadaAdminLogic.appendCommentHistory(masterRow[4], history);
+  masterRow[4] = AppamadaAdminLogic.appendCommentHistory(
+    normalizeAdminCommentDates_(masterRow[4]),
+    history,
+  );
 
   var metadata = addAdminPlannedMetadata_(masterSheet, sourceRow, application, { history: history });
   writeAdminMasterRowRaw_(spreadsheet, masterSheet, sourceRow, masterRow);

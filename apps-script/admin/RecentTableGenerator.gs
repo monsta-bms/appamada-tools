@@ -19,7 +19,7 @@ function parseRecentTableDateOrdinal_(comment) {
 }
 
 function recentTableTodayOrdinal_(now) {
-  var today = Utilities.formatDate(now || new Date(), ADMIN_CONFIG.timezone, "yyyy/M/d");
+  var today = Utilities.formatDate(now || new Date(), ADMIN_CONFIG.timezone, "yyyy/MM/dd");
   var ordinal = parseRecentTableDateOrdinal_(today);
   if (ordinal === null) throwAdminError_("GOOGLE_SERVICE_ERROR", "today could not be parsed", "エラー");
   return ordinal;

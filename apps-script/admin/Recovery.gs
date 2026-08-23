@@ -17,16 +17,19 @@ function recoverAdminChangeMetadata_(spreadsheet, applicationSheet, masterSheet,
   var metadataRow = getAdminMetadataRow_(metadata);
   var masterRow = masterSheet.getRange(metadataRow, 1, 1, 5).getValues()[0];
   var level = String(masterRow[0]);
-  var history = String(value.history || "");
+  var history = normalizeAdminCommentDates_(value.history);
   if (!history) throwAdminError_("RECOVERY_FAILED", "change metadata history is missing", "要確認");
 
   if (level === application.record.targetLevel) {
-    if (String(masterRow[4]).split(" / ").indexOf(history) === -1) {
+    if (normalizeAdminCommentDates_(masterRow[4]).split(" / ").indexOf(history) === -1) {
       throwAdminError_("RECOVERY_FAILED", "target level exists without the planned history", "要確認");
     }
   } else if (level === application.record.originalLevel) {
     masterRow[0] = application.record.targetLevel;
-    masterRow[4] = AppamadaAdminLogic.appendCommentHistory(masterRow[4], history);
+    masterRow[4] = AppamadaAdminLogic.appendCommentHistory(
+      normalizeAdminCommentDates_(masterRow[4]),
+      history,
+    );
     writeAdminMasterRowRaw_(spreadsheet, masterSheet, metadataRow, masterRow);
   } else {
     throwAdminError_("RECOVERY_FAILED", "change row is neither original nor target level", "要確認");

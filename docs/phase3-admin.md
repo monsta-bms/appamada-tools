@@ -23,7 +23,7 @@ kkjは処理開始時に全体を一度検証します。行データが正当�
 
 反映前にMD5一意性、I/J難易度、現在のkkj level、表順序を再検証します。現在levelがIと違う場合は上書きせず`STALE_CURRENT_LEVEL` / `要確認`です。F/Gはchangeでは使用せず、kkj title/artistを変更しません。
 
-kkj commentへ`yyyy.M.d 旧→新`を` / `区切りで追記します。同じ履歴が既にあれば追加しません。level変更後は対象level block末尾へ`moveRows`し、最終行番号を処理メモへ保存します。
+kkj commentへ`yyyy/MM/dd 旧→新`を` / `区切りで追記します。同じ履歴が既にあれば追加しません。既存コメント内の有効な`yyyy.M.d`／`yyyy/M/d`も、URLを変更せず`yyyy/MM/dd`へ正規化します。SheetsのDate型およびDate型が文字列化された日本標準時表現も同形式へ戻します。level変更後は対象level block末尾へ`moveRows`し、最終行番号を処理メモへ保存します。
 
 移動が固定行またはbasic filterの見出しを跨ぐ場合、固定行数とfilter範囲・列条件を一時退避します。移動後は元の固定行数とfilterを復元し、通常の行移動ではこれらに触れません。移動後のDeveloper Metadataは古いオブジェクト参照を再利用せず、request_idで再検索します。
 
@@ -38,6 +38,8 @@ level, title, artist, md5, "yyyy/MM/dd 申請コメント"
 ```
 
 E列には○反映日のAsia/Tokyo日付を`yyyy/MM/dd`形式で先頭へ追加し、その後ろへ申請一覧K列のコメントを半角スペース区切りで転記します。例: `2026/08/15 差分URL:XXXX`。コメントが空欄の場合は日付だけを文字列として保存します。この処理はnewだけが対象で、changeの履歴追記とdeleteには適用しません。
+
+申請コメント内に日付が含まれる場合も、kkjへ保存する時点で`yyyy/MM/dd`へ正規化します。仮置きからkkjへ反映するコメントも同じ規則を使用します。管理メニューの「kkjコメント日付をYYYY/MM/DDへ統一」は、E列の全データを監査し、数式がないことを確認してからRAW文字列として一括更新・再読込検証します。
 
 `=`, `+`, `-`, `@`で始まる文字列も式として評価しません。対象level blockがなければ現在の公開順で次のblock直前へ挿入します。同じMD5が先に追加済みなら`CHART_ALREADY_EXISTS` / `要確認`です。
 新規行を既存basic filter範囲内へ挿入する場合は、filter範囲と列条件を退避し、挿入後も元の範囲・条件を復元します。

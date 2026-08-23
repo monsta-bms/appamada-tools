@@ -45,12 +45,58 @@ function adminTimestamp_() {
 }
 
 function adminHistoryDate_() {
-  return Utilities.formatDate(new Date(), ADMIN_CONFIG.timezone, "yyyy.M.d");
+  return Utilities.formatDate(new Date(), ADMIN_CONFIG.timezone, "yyyy/MM/dd");
+}
+
+function isValidAdminCommentDate_(year, month, day) {
+  if (month < 1 || month > 12 || day < 1) return false;
+  var leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  var days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= days[month - 1];
+}
+
+function normalizeAdminCommentDateSegment_(segment) {
+  return String(segment).replace(
+    /(^|[^\d])(\d{4})([\/.])(\d{1,2})\3(\d{1,2})(?=$|[^\d])/g,
+    function (matched, prefix, yearText, separator, monthText, dayText) {
+      var year = Number(yearText);
+      var month = Number(monthText);
+      var day = Number(dayText);
+      if (!isValidAdminCommentDate_(year, month, day)) return matched;
+      return prefix + yearText + "/" + String(month).padStart(2, "0") + "/" + String(day).padStart(2, "0");
+    },
+  );
+}
+
+function normalizeAdminCommentDates_(value) {
+  if (value && typeof value.getTime === "function" && !isNaN(value.getTime())) {
+    return Utilities.formatDate(new Date(value.getTime()), ADMIN_CONFIG.timezone, "yyyy/MM/dd");
+  }
+  var text = value === null || value === undefined ? "" : String(value);
+  var serializedDate = text.match(
+    /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2}) (\d{4}) 00:00:00 GMT\+0900 \(日本標準時\)$/,
+  );
+  if (serializedDate) {
+    var month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+      .indexOf(serializedDate[1]) + 1;
+    var day = Number(serializedDate[2]);
+    var year = Number(serializedDate[3]);
+    if (isValidAdminCommentDate_(year, month, day)) {
+      return String(year) + "/" + String(month).padStart(2, "0") + "/" + String(day).padStart(2, "0");
+    }
+  }
+  return text
+    .split(/(https?:\/\/\S+)/g)
+    .map(function (part) {
+      return /^https?:\/\//.test(part) ? part : normalizeAdminCommentDateSegment_(part);
+    })
+    .join("");
 }
 
 function formatAdminNewComment_(comment, datePrefix) {
-  var value = String(comment || "");
-  return String(datePrefix) + (value ? " " + value : "");
+  var value = normalizeAdminCommentDates_(comment);
+  var prefix = normalizeAdminCommentDates_(datePrefix);
+  return prefix + (value ? " " + value : "");
 }
 
 function adminNewCommentDate_() {

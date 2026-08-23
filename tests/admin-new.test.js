@@ -32,6 +32,8 @@ test("new comments use the requested slash date prefix", async () => {
   vm.runInContext(source, context, { filename: "Config.gs" });
   assert.equal(context.adminNewComment_("差分URL:XXXX"), "2026/08/15 差分URL:XXXX");
   assert.equal(context.adminNewComment_(""), "2026/08/15");
+  assert.equal(context.adminNewComment_("2025.2.23 memo"), "2026/08/15 2025/02/23 memo");
+  assert.equal(context.adminHistoryDate_(), "2026/08/15");
 });
 
 test("approved new applications persist the dated comment and recovery value", async () => {
