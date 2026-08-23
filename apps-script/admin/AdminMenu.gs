@@ -1,4 +1,4 @@
-function onOpen() {
+function addAdminMenu_() {
   SpreadsheetApp.getUi()
     .createMenu("不放逸管理")
     .addItem("選択行を再処理", "reprocessSelectedAdminRows")
@@ -9,6 +9,9 @@ function onOpen() {
     .addItem("MD5重複を検査", "inspectMd5Duplicates")
     .addItem("レベル順序を検査", "inspectTableOrder")
     .addItem("Trigger状態を確認", "inspectAdminTriggersFromMenu")
+    .addSeparator()
+    .addItem("新規譜面表生成(一週間)", "generateRecentWeekTable")
+    .addItem("新規譜面表生成(一ヶ月)", "generateRecentMonthTable")
     .addToUi();
 }
 
