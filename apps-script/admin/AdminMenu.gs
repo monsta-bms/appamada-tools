@@ -10,6 +10,7 @@ function addAdminMenu_() {
     .addItem("レベル順序を検査", "inspectTableOrder")
     .addItem("Trigger状態を確認", "inspectAdminTriggersFromMenu")
     .addSeparator()
+    .addItem("新規譜面表生成(3日前)", "generateRecentThreeDayTable")
     .addItem("新規譜面表生成(一週間)", "generateRecentWeekTable")
     .addItem("新規譜面表生成(一ヶ月)", "generateRecentMonthTable")
     .addItem("kkjコメント日付をYYYY/MM/DDへ統一", "normalizeAdminMasterCommentDates")

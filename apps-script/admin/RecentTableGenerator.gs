@@ -25,11 +25,24 @@ function recentTableTodayOrdinal_(now) {
   return ordinal;
 }
 
+function isRecentTableDifficultyChangeComment_(comment) {
+  if (comment && typeof comment.getTime === "function" && !isNaN(comment.getTime())) return false;
+  var match = String(comment || "").match(
+    /^\d{4}[\/.]\d{1,2}[\/.]\d{1,2}\s+(\S+)→(\S+)(?:\s|$)/,
+  );
+  return Boolean(
+    match &&
+    AppamadaAdminLogic.PUBLISH_LEVEL_ORDER.indexOf(match[1]) !== -1 &&
+    AppamadaAdminLogic.PUBLISH_LEVEL_ORDER.indexOf(match[2]) !== -1
+  );
+}
+
 function filterRecentTableRows_(rows, windowDays, todayOrdinal) {
   var days = Number(windowDays);
   if (!Number.isInteger(days) || days < 1) throw new Error("windowDays must be a positive integer");
   var cutoff = todayOrdinal - days + 1;
   return rows.filter(function (row) {
+    if (isRecentTableDifficultyChangeComment_(row[4])) return false;
     var date = parseRecentTableDateOrdinal_(row[4]);
     return date !== null && date >= cutoff && date <= todayOrdinal;
   });
@@ -83,6 +96,10 @@ function generateRecentTable_(sheetName, windowDays) {
 
 function generateRecentWeekTable() {
   return generateRecentTable_("一週間", 7);
+}
+
+function generateRecentThreeDayTable() {
+  return generateRecentTable_("3日前", 3);
 }
 
 function generateRecentMonthTable() {
