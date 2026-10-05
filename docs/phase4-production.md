@@ -49,3 +49,12 @@ Userscript Managerは低いversionへ自動downgradeしない場合がありま�
 - 管理者が削除申請のA列へ`○`を入力した場合、MD5一意性と投稿時現難易度の一致を再確認してからkkjの該当行を削除
 - 削除前に申請行へ復旧マーカーをRAW保存し、削除後の中断はscheduled recoveryで反映済みへ回収
 - 緊急停止時は従来どおり`SUBMIT_ENABLED=false`および`ADMIN_APPLY_ENABLED=false`を使用
+
+## Production release 0.4.6 — API recovery (2026-10-05)
+
+- 旧申請APIがHTTP 404を返す状態を確認し、既存APIソースを変更せず新しいStandaloneプロジェクトへ復元
+- 既存の申請一覧・kkj・削除済の列構成を確認した後、Script Propertiesを設定して投稿受付を復旧。Spreadsheetのセル・管理用Apps Script・公開難易度表は変更していない
+- Userscriptは接続先とversionを0.4.6へ更新しただけで、UI・parser・申請処理に変更なし
+- 匿名の実通信で登録済み／未登録のlookupがHTTP 200の正常JSONを返し、空のPOSTが`APPLICATION_TYPE_INVALID`で拒否されることを確認
+- unit test 174件、公開配布版smoke 4件が合格
+- 今回は本番へ架空の申請行を追加していないため、正常な申請の実送信・書き込みとTampermonkey実機操作は未確認

@@ -23,7 +23,7 @@ function normalizeEol(value) {
 function assertReleaseMetadata(source) {
   assert.equal(source.startsWith("// ==UserScript=="), true);
   assert.match(source, /^\/\/ @name\s+不放逸 BMSIR申請$/m);
-  assert.match(source, /^\/\/ @version\s+0\.4\.5$/m);
+  assert.match(source, /^\/\/ @version\s+0\.4\.6$/m);
   assert.doesNotMatch(source, /採用されると管理者の○反映時にkkj/);
   assert.match(source, /^\/\/ @run-at\s+document-idle$/m);
   assert.match(source, /^\/\/ @noframes$/m);
