@@ -6,6 +6,9 @@ import { JSDOM } from "jsdom";
 import { parseBmsirPage, resolveSongElements } from "../src/bmsir-parser.js";
 import { ALLOWED_LEVELS } from "../src/levels.js";
 import { errorMessageFor, installSubmissionUi } from "../src/ui.js";
+import { ApiClientError } from "../src/api-client.js";
+import { createOutbox, OFFLINE_NOTICE } from "../src/outbox.js";
+import { memoryStorage } from "./helpers/outbox-storage.js";
 
 const MD5 = "b89279d026c9d40d0f5eedde2e25b920";
 const PAGE_URL = `https://bms-ir.org/new/song?songmd5=${MD5}&view=new`;
@@ -19,7 +22,7 @@ const currentFixture = await readFile(
   "utf8",
 );
 
-function setup({ lookup, submit, html = legacyFixture } = {}) {
+function setup({ lookup, submit, html = legacyFixture, withOutbox = false, storage = memoryStorage() } = {}) {
   const dom = new JSDOM(html, { url: PAGE_URL, pretendToBeVisual: true });
   const parsedPage = parseBmsirPage(dom.window.document, PAGE_URL);
   let styleText = "";
@@ -27,15 +30,19 @@ function setup({ lookup, submit, html = legacyFixture } = {}) {
     lookup: lookup ?? (async () => ({ ok: true, exists: false })),
     submit: submit ?? (async () => ({ ok: true, request_id: UUID, deduplicated: false })),
   };
+  const outbox = withOutbox ? createOutbox({ storage, apiClient,
+    playerId: parsedPage.user.playerId, sleep: async () => {} }) : undefined;
   const ui = installSubmissionUi({
     document: dom.window.document,
     window: dom.window,
     parsedPage,
     apiClient,
+    outbox,
+    clientVersion: "0.4.7",
     cryptoObject: { randomUUID: () => UUID },
     addStyle(css) { styleText = css; },
   });
-  return { dom, document: dom.window.document, ui, apiClient, styleText };
+  return { dom, document: dom.window.document, ui, apiClient, styleText, outbox, storage };
 }
 
 function contextMenu(dom, target, options = {}) {
@@ -356,4 +363,111 @@ test("delete requires a registered chart and submits the fixed delete marker", a
   await openWorkflow(missing, "delete");
   assert.match(missing.document.querySelector(".appamada-modal").textContent, /新規譜面申請を利用/);
   missing.dom.window.close();
+});
+
+test("offline uses the same three forms, metadata, grids and exact notice; no POST on save", async () => {
+  for (const type of ["change", "new", "delete"]) {
+    let posts = 0;
+    const state = setup({ withOutbox: true, html: currentFixture,
+      lookup: async () => { throw new ApiClientError("API_TIMEOUT", "fixture"); },
+      submit: async () => { posts++; },
+    });
+    await openWorkflow(state, type);
+    const modal = state.document.querySelector(".appamada-modal");
+    assert.equal(modal.getAttribute("role"), "dialog");
+    assert.match(modal.textContent, /不放逸 .*申請/);
+    assert.equal(modal.querySelector(".appamada-status").textContent, OFFLINE_NOTICE);
+    assert.match(modal.textContent, /図書室のエルザ \[FOX\]/);
+    if (type === "change") {
+      for (const arrow of modal.querySelectorAll(".appamada-step button")) {
+        assert.equal(arrow.disabled, true);
+        assert.match(arrow.title, /選択できません/);
+      }
+      assert.equal(modal.querySelector(".appamada-selected").textContent, "選択してください");
+      assert.equal([...modal.querySelectorAll(".appamada-level-grid")].at(-1).hidden, false);
+    }
+    if (type !== "delete") modal.querySelector('[data-level="13-"]').click();
+    const submit = modal.querySelector(".appamada-submit");
+    assert.equal(submit.textContent, "ブラウザに保存");
+    assert.equal(submit.disabled, false);
+    modal.querySelector("textarea").value = "fixture comment";
+    submit.click();
+    await flush();
+    await flush();
+    assert.equal(posts, 0);
+    assert.equal(submit.textContent, "保存済み（送信待ち）");
+    assert.equal(submit.disabled, true);
+    assert.match(modal.textContent, /まだ送信完了していません/);
+    const [entry] = await state.outbox.list();
+    assert.equal(entry.payload.application_type, type);
+    assert.equal(entry.payload.proposed_level, type === "delete" ? "削除" : "13-");
+    assert.equal(entry.payload.comment, "fixture comment");
+    assert.equal("current_level" in entry.payload, false);
+    if (type !== "new") assert.equal("title" in entry.payload, false);
+    else assert.match(entry.payload.artist, /Notes:キラ Illustration:かぜっと/);
+    state.ui.destroy();
+    state.dom.window.close();
+  }
+});
+
+test("failed prefetch opens offline form immediately and unavailable storage cannot claim saved", async () => {
+  let lookups = 0;
+  const state = setup({ lookup: async () => { lookups++; return { ok: true, exists: false }; } });
+  state.ui.markLookupUnavailable("API_NETWORK_ERROR");
+  await openWorkflow(state, "new");
+  assert.equal(lookups, 0);
+  state.document.querySelector('[data-level="10"]').click();
+  assert.equal(state.document.querySelector(".appamada-submit").disabled, true);
+  assert.match(state.document.querySelector(".appamada-modal").textContent, /保存権限/);
+  state.dom.window.close();
+});
+
+test("online timeout stores the unchanged payload and queue displays refusal without automatic type conversion", async () => {
+  let timeout = true;
+  const submitted = [];
+  const state = setup({ withOutbox: true, submit: async (body) => {
+    submitted.push(structuredClone(body));
+    if (timeout) throw new ApiClientError("API_TIMEOUT", "fixture");
+    return { ok: false, error: { code: "CHART_ALREADY_EXISTS" } };
+  } });
+  await openWorkflow(state, "new");
+  state.document.querySelector('[data-level="10+"]').click();
+  state.document.querySelector(".appamada-submit").click();
+  await flush(); await flush();
+  assert.equal((await state.outbox.list())[0].status, "pending");
+  assert.match(state.document.querySelector(".appamada-modal").textContent, /まだ送信完了していません/);
+  timeout = false;
+  await state.outbox.send(UUID);
+  await openWorkflow(state, "saved");
+  assert.match(state.document.querySelector(".appamada-modal").textContent, /受付不可/);
+  assert.match(state.document.querySelector(".appamada-modal").textContent, /すでに不放逸に登録/);
+  assert.deepEqual(submitted[0], submitted[1]);
+  assert.equal((await state.outbox.list())[0].payload.application_type, "new");
+  state.ui.destroy(); state.dom.window.close();
+});
+
+test("storage save failure shows an error, keeps form retryable and never sends", async () => {
+  const storage = memoryStorage();
+  storage.set = async () => { throw new Error("quota"); };
+  let posts = 0;
+  const state = setup({ withOutbox: true, storage, submit: async () => { posts++; } });
+  await openWorkflow(state, "new");
+  state.document.querySelector('[data-level="10"]').click();
+  state.document.querySelector(".appamada-submit").click();
+  await flush();
+  assert.equal(posts, 0);
+  assert.match(state.document.querySelector(".appamada-status-error").textContent, /読み書きができません/);
+  assert.equal(state.document.querySelector(".appamada-submit").disabled, false);
+  state.dom.window.close();
+});
+
+test("closed lookup modal is not reopened by a late response", async () => {
+  let finish;
+  const state = setup({ lookup: () => new Promise((resolve) => { finish = resolve; }) });
+  await openWorkflow(state, "new");
+  state.ui.closeModal();
+  finish({ ok: true, exists: false });
+  await flush();
+  assert.equal(state.document.querySelector(".appamada-overlay"), null);
+  state.dom.window.close();
 });

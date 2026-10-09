@@ -7,6 +7,14 @@
 // @match        https://www.bms-ir.org/new/song*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
+// @grant        GM.getValue
+// @grant        GM.setValue
+// @grant        GM.deleteValue
+// @grant        GM.listValues
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
+// @grant        GM_listValues
 // @connect      script.google.com
 // @connect      script.googleusercontent.com
 // @run-at       document-idle

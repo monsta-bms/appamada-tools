@@ -1,5 +1,6 @@
 import { ApiClientError } from "./api-client.js";
 import { codePointLength, resolveSongElements } from "./bmsir-parser.js";
+import { OFFLINE_NOTICE, isCommunicationError } from "./outbox.js";
 import {
   SPECIAL_LEVELS,
   STEP_LEVELS,
@@ -42,6 +43,12 @@ const ERROR_MESSAGES = Object.freeze({
   REQUEST_ID_CONFLICT: "送信識別子が競合しました。画面を開き直してください。",
   WRITE_FAILED: "申請一覧へ保存できませんでした。",
   INTERNAL_ERROR: "サーバー内部でエラーが発生しました。",
+  OUTBOX_STORAGE_UNAVAILABLE: "保存した提案の読み書きができませんでした。保存権限や空き容量を確認してください。送信状況は「保存した提案」で確認してください。",
+  OUTBOX_INVALID_DATA: "保存した提案を読み取れませんでした。データは削除していません。",
+  OUTBOX_FULL: "保存件数が上限に達しました。保存した提案から送信済み・受付不可の項目を消してください。",
+  OUTBOX_CONFLICT: "同じ申請の保存内容が一致しません。保存した提案を確認してください。",
+  OUTBOX_CANNOT_CANCEL: "送信を試みた提案は、受け付けられた可能性があるため取り消せません。",
+  OUTBOX_BUSY: "保存した提案を送信中です。少し待ってください。",
 });
 
 const STYLE = `
@@ -56,11 +63,13 @@ const STYLE = `
 .appamada-modal-header{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #ddd}
 .appamada-modal-header h2{margin:0 0 12px;font-size:1.25rem;color:#222;font-weight:700;opacity:1;text-shadow:none}
 .appamada-close{padding:5px 10px;border:1px solid #888;border-radius:5px;background:#fff;color:#222;opacity:1;-webkit-text-fill-color:#222;cursor:pointer}
+.appamada-modal .appamada-close:disabled{background:#eee;color:#777;-webkit-text-fill-color:#777;cursor:not-allowed}
 .appamada-facts{display:grid;grid-template-columns:max-content 1fr;gap:5px 12px;margin:16px 0}
 .appamada-facts dt{font-weight:700}.appamada-facts dd{margin:0;overflow-wrap:anywhere}
 .appamada-level-grid{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 14px}
 .appamada-level-grid button,.appamada-step button{padding:6px 10px;border:1px solid #777;border-radius:6px;background:#fff;color:#222;cursor:pointer}
 .appamada-level-grid button[aria-pressed="true"]{background:#244f91;color:#fff;border-color:#244f91}
+.appamada-step button:disabled,.appamada-level-grid button:disabled{background:#eee;color:#777;cursor:not-allowed;opacity:1}
 .appamada-step{display:flex;align-items:center;justify-content:center;gap:10px;margin:12px 0}
 .appamada-selected{min-width:90px;text-align:center;font-weight:700;font-size:1.2rem}
 .appamada-comment{display:grid;gap:5px;margin:14px 0}.appamada-comment textarea{box-sizing:border-box;width:100%;min-height:90px;padding:8px;border:1px solid #777;background:#fff;color:#222;color-scheme:light;opacity:1;-webkit-text-fill-color:#222;caret-color:#222;font:inherit}
@@ -69,6 +78,7 @@ const STYLE = `
 .appamada-submit-danger{background:#a51d2d}.appamada-warning{padding:10px;border-left:4px solid #a51d2d;background:#fff1f2;color:#6f101c}
 .appamada-status{margin:12px 0;padding:10px;border-radius:6px;background:#eef3fb}.appamada-status-error{background:#fdebec;color:#8b0018}.appamada-status-success{background:#e8f6ec;color:#145a28}
 .appamada-subheading{margin:14px 0 4px;font-weight:700}
+.appamada-saved-item{padding:12px 0;border-bottom:1px solid #ddd}.appamada-saved-item p{overflow-wrap:anywhere}
 `;
 
 function element(document, tagName, options = {}) {
@@ -106,6 +116,7 @@ export function installSubmissionUi({
   window,
   parsedPage,
   apiClient,
+  outbox,
   clientVersion = "0.0.0",
   cryptoObject = window.crypto,
   addStyle,
@@ -130,6 +141,17 @@ export function installSubmissionUi({
 
   let activeMenu = null;
   let activeModal = null;
+  let lookupUnavailableUntil = 0;
+
+  function markLookupUnavailable(code) {
+    if (isCommunicationError(code)) lookupUnavailableUntil = Date.now() + 30_000;
+  }
+
+  function offlineInfo(shell) {
+    shell.content.append(statusNode(document, OFFLINE_NOTICE), statusNode(document,
+      outbox ? "提案はこのブラウザに保存され、通信が回復したら順番に送信されます。"
+        : errorMessageFor("OUTBOX_STORAGE_UNAVAILABLE"), outbox ? "info" : "error"));
+  }
 
   function closeMenu() {
     activeMenu?.remove();
@@ -225,13 +247,37 @@ export function installSubmissionUi({
     };
   }
 
-  async function runSubmit({ payload, button, updateDisabled, statusContainer }) {
+  async function runSubmit({ payload, button, updateDisabled, statusContainer, offline = false }) {
     if (button.dataset.submitting === "true") return;
     button.dataset.submitting = "true";
-    button.textContent = "送信中…";
+    button.textContent = offline ? "保存中…" : "送信中…";
     updateDisabled();
-    statusContainer.replaceChildren(statusNode(document, "申請を送信しています。"));
+    statusContainer.replaceChildren(statusNode(document, offline ? "提案をブラウザに保存しています。" : "申請を送信しています。"));
     try {
+      if (outbox) {
+        const entry = await outbox.enqueue(payload, parsedPage.song, { defer: offline });
+        const result = offline ? entry : await outbox.send(entry.payload.request_id);
+        if (result.status === "sent") {
+          statusContainer.replaceChildren(statusNode(document, "申請を送信しました。", "success"));
+          button.textContent = "送信済み";
+        } else if (result.status === "rejected") {
+          statusContainer.replaceChildren(statusNode(document, errorMessageFor(result.errorCode), "error"));
+          button.dataset.submitting = "false";
+          button.textContent = offline ? "ブラウザに保存" : "申請を送信";
+          updateDisabled();
+          return;
+        } else {
+          markLookupUnavailable(result.errorCode);
+          const reason = result.errorCode && !isCommunicationError(result.errorCode)
+            ? `${errorMessageFor(result.errorCode)} ` : "";
+          statusContainer.replaceChildren(statusNode(document,
+            `${isCommunicationError(result.errorCode) ? `${OFFLINE_NOTICE}。 ` : ""}${reason}提案をブラウザに保存しました。まだ送信完了していません。通信が回復したら再送します。右クリックの「保存した提案」から確認できます。`));
+          button.textContent = "保存済み（送信待ち）";
+        }
+        button.dataset.completed = "true";
+        updateDisabled();
+        return;
+      }
       const result = await apiClient.submit(payload);
       if (result.ok) {
         const message = result.deduplicated
@@ -247,31 +293,38 @@ export function installSubmissionUi({
         statusNode(document, errorMessageFor(result.error.code), "error"),
       );
     } catch (error) {
-      const code = error instanceof ApiClientError ? error.code : "INTERNAL_ERROR";
+      const code = error?.code ?? "INTERNAL_ERROR";
       logger?.debug?.("SUBMIT_FAILED", code);
       statusContainer.replaceChildren(statusNode(document, errorMessageFor(code), "error"));
     }
     button.dataset.submitting = "false";
-    button.textContent = "申請を送信";
+    button.textContent = offline ? "ブラウザに保存" : "申請を送信";
     updateDisabled();
   }
 
-  function renderChange(chart) {
+  function renderChange(chart, offline = false) {
     const shell = modalShell("不放逸 難易度変更申請");
+    if (offline) offlineInfo(shell);
     shell.content.append(
       facts([
         ["曲名", chart.title],
         ["artist", chart.artist],
         ["投稿者", parsedPage.user.name],
-        ["現在難易度", chart.current_level],
+        ["現在難易度", offline ? "取得できません" : chart.current_level],
       ]),
     );
 
-    let selectedLevel = chart.current_level;
+    let selectedLevel = offline ? null : chart.current_level;
     const step = element(document, "div", { className: "appamada-step" });
     const harder = element(document, "button", { text: "難しく ↑", type: "button" });
     const selected = element(document, "span", { className: "appamada-selected" });
     const easier = element(document, "button", { text: "易しく ↓", type: "button" });
+    if (offline) {
+      for (const button of [harder, easier]) {
+        button.title = "現在難易度を取得できないため選択できません。下のレベルから直接選んでください。";
+        button.setAttribute("aria-label", `${button.textContent}（現在難易度を取得できないため選択できません）`);
+      }
+    }
     step.append(harder, selected, easier);
 
     shell.content.append(element(document, "p", { className: "appamada-subheading", text: "変更案" }), step);
@@ -301,7 +354,7 @@ export function installSubmissionUi({
     const actions = element(document, "div", { className: "appamada-actions" });
     const submit = element(document, "button", {
       className: "appamada-submit",
-      text: "申請を送信",
+      text: offline ? "ブラウザに保存" : "申請を送信",
       type: "button",
     });
     actions.append(submit);
@@ -313,21 +366,22 @@ export function installSubmissionUi({
     }
 
     function update() {
-      selected.textContent = `卍${selectedLevel}`;
+      selected.textContent = selectedLevel === null ? "選択してください" : `卍${selectedLevel}`;
       const harderLevel = getHarderLevel(selectedLevel);
       const easierLevel = getEasierLevel(selectedLevel);
       const busy = submit.dataset.submitting === "true" || submit.dataset.completed === "true";
-      harder.disabled = busy || harderLevel === null;
-      easier.disabled = busy || easierLevel === null;
+      harder.disabled = offline || busy || harderLevel === null;
+      easier.disabled = offline || busy || easierLevel === null;
       for (const button of [...specialButtons, ...normalButtons]) {
         button.setAttribute("aria-pressed", String(button.dataset.level === selectedLevel));
         button.disabled = busy;
       }
-      const showNormalGrid = isSpecialLevel(chart.current_level) || isSpecialLevel(selectedLevel);
+      const showNormalGrid = offline || isSpecialLevel(chart.current_level) || isSpecialLevel(selectedLevel);
       normalHeading.hidden = !showNormalGrid;
       normalGrid.hidden = !showNormalGrid;
       submit.disabled =
-        busy || selectedLevel === chart.current_level || codePointLength(comment.value) > 500;
+        busy || (offline && !outbox) || selectedLevel === null ||
+        (!offline && selectedLevel === chart.current_level) || codePointLength(comment.value) > 500;
     }
 
     harder.addEventListener("click", () => {
@@ -342,13 +396,14 @@ export function installSubmissionUi({
       if (submit.disabled) return;
       const payload = commonPayload("change", comment.value.normalize("NFC"));
       payload.proposed_level = selectedLevel;
-      void runSubmit({ payload, button: submit, updateDisabled: update, statusContainer });
+      void runSubmit({ payload, button: submit, updateDisabled: update, statusContainer, offline });
     });
     update();
   }
 
-  function renderNew() {
+  function renderNew(offline = false) {
     const shell = modalShell("不放逸 新規譜面申請");
+    if (offline) offlineInfo(shell);
     shell.content.append(
       facts([
         ["曲名", parsedPage.song.title],
@@ -386,7 +441,7 @@ export function installSubmissionUi({
     const actions = element(document, "div", { className: "appamada-actions" });
     const submit = element(document, "button", {
       className: "appamada-submit",
-      text: "申請を送信",
+      text: offline ? "ブラウザに保存" : "申請を送信",
       type: "button",
     });
     actions.append(submit);
@@ -403,7 +458,7 @@ export function installSubmissionUi({
         button.setAttribute("aria-pressed", String(button.dataset.level === selectedLevel));
         button.disabled = busy;
       }
-      submit.disabled = busy || selectedLevel === null || codePointLength(comment.value) > 500;
+      submit.disabled = busy || (offline && !outbox) || selectedLevel === null || codePointLength(comment.value) > 500;
     }
 
     submit.addEventListener("click", () => {
@@ -414,19 +469,20 @@ export function installSubmissionUi({
         artist: parsedPage.song.artist,
         proposed_level: selectedLevel,
       });
-      void runSubmit({ payload, button: submit, updateDisabled: update, statusContainer });
+      void runSubmit({ payload, button: submit, updateDisabled: update, statusContainer, offline });
     });
     update();
   }
 
-  function renderDelete(chart) {
+  function renderDelete(chart, offline = false) {
     const shell = modalShell("不放逸 削除申請");
+    if (offline) offlineInfo(shell);
     shell.content.append(
       facts([
         ["曲名", chart.title],
         ["artist", chart.artist],
         ["投稿者", parsedPage.user.name],
-        ["現在難易度", chart.current_level],
+        ["現在難易度", offline ? "取得できません" : chart.current_level],
       ]),
       element(document, "p", {
         className: "appamada-warning",
@@ -442,7 +498,7 @@ export function installSubmissionUi({
     const actions = element(document, "div", { className: "appamada-actions" });
     const submit = element(document, "button", {
       className: "appamada-submit appamada-submit-danger",
-      text: "申請を送信",
+      text: offline ? "ブラウザに保存" : "申請を送信",
       type: "button",
     });
     actions.append(submit);
@@ -450,24 +506,32 @@ export function installSubmissionUi({
 
     function update() {
       const busy = submit.dataset.submitting === "true" || submit.dataset.completed === "true";
-      submit.disabled = busy || codePointLength(comment.value) > 500;
+      submit.disabled = busy || (offline && !outbox) || codePointLength(comment.value) > 500;
     }
 
     submit.addEventListener("click", () => {
       if (submit.disabled) return;
       const payload = commonPayload("delete", comment.value.normalize("NFC"));
       payload.proposed_level = "削除";
-      void runSubmit({ payload, button: submit, updateDisabled: update, statusContainer });
+      void runSubmit({ payload, button: submit, updateDisabled: update, statusContainer, offline });
     });
     update();
   }
 
   async function openWorkflow(applicationType) {
     closeMenu();
+    function renderOffline() {
+      if (applicationType === "change") renderChange(parsedPage.song, true);
+      else if (applicationType === "delete") renderDelete(parsedPage.song, true);
+      else renderNew(true);
+    }
+    if (lookupUnavailableUntil > Date.now()) { renderOffline(); return; }
     const shell = modalShell("不放逸 申請");
     shell.content.append(statusNode(document, "登録状況を確認しています。"));
     try {
       const lookup = await apiClient.lookup(parsedPage.song.md5);
+      if (activeModal !== shell) return;
+      lookupUnavailableUntil = 0;
       if (!lookup.ok) {
         logger?.debug?.("LOOKUP_FAILED", lookup.error.code);
         showMessage("申請できません", errorMessageFor(lookup.error.code));
@@ -493,9 +557,84 @@ export function installSubmissionUi({
     } catch (error) {
       const code = error instanceof ApiClientError ? error.code : "INTERNAL_ERROR";
       logger?.debug?.("LOOKUP_FAILED", code);
-      showMessage("通信エラー", errorMessageFor(code));
+      if (activeModal !== shell) return;
+      if (isCommunicationError(code)) {
+        markLookupUnavailable(code);
+        renderOffline();
+      } else showMessage("通信エラー", errorMessageFor(code));
     }
   }
+
+  async function showSaved() {
+    closeMenu();
+    const shell = modalShell("不放逸 保存した提案");
+    shell.content.append(statusNode(document,
+      "このブラウザに保存した提案です。BMS-IRの譜面ページを開いている間、送信待ちの提案を順番に送信します。"));
+    const actions = element(document, "div", { className: "appamada-actions" });
+    const retry = element(document, "button", { className: "appamada-submit", type: "button", text: "送信待ちを再送" });
+    const refresh = element(document, "button", { className: "appamada-close", type: "button", text: "表示を更新" });
+    const backup = element(document, "button", { className: "appamada-close", type: "button", text: "控えを保存" });
+    const status = element(document, "div");
+    const items = element(document, "div");
+    actions.append(retry, refresh, backup);
+    shell.content.append(actions, status, items);
+    async function updateList() {
+      try {
+        const entries = await outbox.list();
+        if (activeModal !== shell) return;
+        items.replaceChildren();
+        if (!entries.length) items.append(statusNode(document, "保存した提案はありません。"));
+        for (const entry of entries) {
+          const item = element(document, "section", { className: "appamada-saved-item" });
+          const labels = { change: "難易度変更", new: "新規譜面", delete: "削除" };
+          const states = { pending: "送信待ち", sending: "送信結果を確認中", sent: "送信済み", rejected: "受付不可" };
+          item.append(facts([
+            ["曲名", entry.metadata.title], ["artist", entry.metadata.artist],
+            ["提案", `${labels[entry.payload.application_type]}：${entry.payload.proposed_level}`],
+            ["状態", states[entry.status]], ["コメント", entry.payload.comment],
+          ]));
+          if (entry.errorCode && entry.status !== "sent") item.append(statusNode(document, errorMessageFor(entry.errorCode), "error"));
+          const remove = element(document, "button", { className: "appamada-close", type: "button",
+            text: ["sent", "rejected"].includes(entry.status) ? "控えを消す" : "保存を取り消す" });
+          remove.disabled = !["sent", "rejected"].includes(entry.status) && entry.attempts > 0;
+          if (remove.disabled) remove.title = "送信を試みたため、受付状況が確定するまで取り消せません。";
+          remove.addEventListener("click", async () => {
+            try { await outbox.remove(entry.payload.request_id); await updateList(); }
+            catch (error) { status.replaceChildren(statusNode(document, errorMessageFor(error.code), "error")); }
+          });
+          item.append(remove);
+          items.append(item);
+        }
+      } catch (error) { status.replaceChildren(statusNode(document, errorMessageFor(error.code), "error")); }
+    }
+    retry.addEventListener("click", async () => {
+      retry.disabled = true;
+      status.replaceChildren(statusNode(document, "保存した提案を確認・送信しています。"));
+      try {
+        await outbox.flush({ manual: true });
+        status.replaceChildren(statusNode(document, "送信状況を確認してください。通信不調や投稿間隔の制限がある場合は、時間を置いて再送します。"));
+      } catch (error) { status.replaceChildren(statusNode(document, errorMessageFor(error.code), "error")); }
+      retry.disabled = false;
+      await updateList();
+    });
+    refresh.addEventListener("click", () => void updateList());
+    backup.addEventListener("click", async () => {
+      try {
+        const data = await outbox.exportData();
+        const link = element(document, "a", { text: "保存した提案の控えをダウンロード" });
+        link.href = `data:application/json;charset=utf-8,${encodeURIComponent(data)}`;
+        link.download = "appamada-saved-proposals.json";
+        status.replaceChildren(link);
+      } catch (error) { status.replaceChildren(statusNode(document, errorMessageFor(error.code), "error")); }
+    });
+    shell.savedRefresh = updateList;
+    await updateList();
+  }
+
+  const unsubscribe = outbox?.subscribe(() => {
+    // Only refresh the saved list; never replace a form the user is editing.
+    if (activeModal?.savedRefresh) void activeModal.savedRefresh();
+  });
 
   function showMenu(event) {
     if (event.shiftKey) return;
@@ -514,6 +653,13 @@ export function installSubmissionUi({
       button.setAttribute("role", "menuitem");
       button.addEventListener("click", () => void openWorkflow(type));
       menu.append(button);
+    }
+    if (outbox) {
+      const saved = element(document, "button", { text: "保存した提案", type: "button" });
+      saved.dataset.action = "saved";
+      saved.setAttribute("role", "menuitem");
+      saved.addEventListener("click", () => void showSaved());
+      menu.append(saved);
     }
     document.body.append(menu);
     const rect = menu.getBoundingClientRect();
@@ -546,9 +692,11 @@ export function installSubmissionUi({
   return Object.freeze({
     closeMenu,
     closeModal,
+    markLookupUnavailable,
     destroy() {
       closeMenu();
       closeModal();
+      unsubscribe?.();
       titleElement.removeEventListener("contextmenu", showMenu);
       artistElement.removeEventListener("contextmenu", showMenu);
       document.removeEventListener("click", onDocumentClick);

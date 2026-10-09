@@ -71,23 +71,36 @@ function parseApiResponse(response) {
 
 function gmRequestAsPromise(gmRequest, details) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let request;
+    function finish(callback, value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    }
+    // Some extension/browser failures never call ontimeout. Bound the wait locally too.
+    const timer = setTimeout(() => {
+      finish(reject, new ApiClientError(API_CLIENT_ERRORS.API_TIMEOUT, "API request timed out"));
+      try { request?.abort?.(); } catch { /* already timed out */ }
+    }, details.timeout);
     try {
-      gmRequest({
+      request = gmRequest({
         ...details,
         anonymous: true,
         responseType: "text",
-        onload: resolve,
+        onload(response) { finish(resolve, response); },
         onerror() {
-          reject(
+          finish(reject,
             new ApiClientError(API_CLIENT_ERRORS.API_NETWORK_ERROR, "API request failed"),
           );
         },
         ontimeout() {
-          reject(new ApiClientError(API_CLIENT_ERRORS.API_TIMEOUT, "API request timed out"));
+          finish(reject, new ApiClientError(API_CLIENT_ERRORS.API_TIMEOUT, "API request timed out"));
         },
       });
     } catch (error) {
-      reject(
+      finish(reject,
         new ApiClientError(API_CLIENT_ERRORS.API_NETWORK_ERROR, "API request could not start", {
           cause: error,
         }),

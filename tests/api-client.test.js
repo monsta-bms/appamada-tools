@@ -10,6 +10,20 @@ import {
 const API_URL = "https://script.google.com/macros/s/test-deployment/exec";
 const MD5 = "b89279d026c9d40d0f5eedde2e25b920";
 
+test("local timeout bounds requests even if the extension never calls back; late load is ignored", async () => {
+  let callbacks;
+  let aborted = 0;
+  const client = createApiClient({ apiUrl: API_URL, timeoutMs: 5, gmRequest(details) {
+    callbacks = details;
+    return { abort() { aborted++; } };
+  } });
+  await assert.rejects(client.lookup(MD5), { code: "API_TIMEOUT" });
+  assert.equal(aborted, 1);
+  callbacks.onload({ status: 200, responseText: '{"ok":true,"exists":false}' });
+  await assert.rejects(client.lookup(MD5), { code: "API_TIMEOUT" });
+  assert.equal(aborted, 2);
+});
+
 function gmSequence(sequence, calls = []) {
   return (details) => {
     calls.push(details);

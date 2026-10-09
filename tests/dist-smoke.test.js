@@ -23,7 +23,7 @@ function normalizeEol(value) {
 function assertReleaseMetadata(source) {
   assert.equal(source.startsWith("// ==UserScript=="), true);
   assert.match(source, /^\/\/ @name\s+不放逸 BMSIR申請$/m);
-  assert.match(source, /^\/\/ @version\s+0\.4\.6$/m);
+  assert.match(source, /^\/\/ @version\s+0\.4\.7$/m);
   assert.doesNotMatch(source, /採用されると管理者の○反映時にkkj/);
   assert.match(source, /^\/\/ @run-at\s+document-idle$/m);
   assert.match(source, /^\/\/ @noframes$/m);
@@ -38,6 +38,14 @@ function assertReleaseMetadata(source) {
   assert.deepEqual(source.match(/^\/\/ @grant\s+.+$/gm), [
     "// @grant        GM_xmlhttpRequest",
     "// @grant        GM_addStyle",
+    "// @grant        GM.getValue",
+    "// @grant        GM.setValue",
+    "// @grant        GM.deleteValue",
+    "// @grant        GM.listValues",
+    "// @grant        GM_getValue",
+    "// @grant        GM_setValue",
+    "// @grant        GM_deleteValue",
+    "// @grant        GM_listValues",
   ]);
   assert.deepEqual(source.match(/^\/\/ @connect\s+.+$/gm), [
     "// @connect      script.google.com",
@@ -136,4 +144,75 @@ test("fatal parse failure emits a structured warning with no page text", async (
   assert.match(serialized, /currentTitleMatches/);
   assert.doesNotMatch(serialized, /FixtureUser|図書室|b89279/i);
   dom.window.close();
+});
+
+test("released bundle saves offline in GM storage and resends after page reopen (modern and legacy APIs)", async () => {
+  const [source, html] = await Promise.all([
+    readFile(publicDistUrl, "utf8"), readFile(new URL("logged-in-song-current.html", fixtureUrl), "utf8"),
+  ]);
+  async function until(check) {
+    for (let n = 0; n < 100; n++) {
+      if (check()) return;
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    assert.fail("bundle did not settle");
+  }
+  for (const storageApi of ["modern", "legacy"]) {
+    const values = new Map();
+    const posted = [];
+    let time = Date.now();
+    function page(offline) {
+      const dom = new JSDOM(html, { url: pageUrl, runScripts: "outside-only" });
+      dom.window.Date.now = () => time;
+      const get = (key) => values.has(key) ? structuredClone(values.get(key)) : undefined;
+      const set = (key, value) => values.set(key, structuredClone(value));
+      const remove = (key) => values.delete(key);
+      const keys = () => [...values.keys()];
+      if (storageApi === "modern") dom.window.GM = {
+        getValue: async (key) => get(key), setValue: async (key, value) => { set(key, value); },
+        deleteValue: async (key) => { remove(key); }, listValues: async () => keys(),
+      };
+      else Object.assign(dom.window, { GM_getValue: get, GM_setValue: set,
+        GM_deleteValue: remove, GM_listValues: keys });
+      dom.window.GM_addStyle = () => {};
+      dom.window.GM_xmlhttpRequest = (details) => {
+        queueMicrotask(() => {
+          if (offline) { details.onerror(); return; }
+          let result = { ok: true, exists: false };
+          if (details.method === "POST") {
+            const body = JSON.parse(details.data);
+            posted.push(body);
+            result = { ok: true, request_id: body.request_id, deduplicated: false };
+          }
+          details.onload({ status: 200, responseText: JSON.stringify(result) });
+        });
+      };
+      dom.window.eval(source);
+      return dom;
+    }
+    const first = page(true);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    first.window.document.querySelector("#main-content > h1").dispatchEvent(
+      new first.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    );
+    first.window.document.querySelector('[data-action="change"]').click();
+    await until(() => first.window.document.querySelector('[data-level="13-"]'));
+    assert.match(first.window.document.querySelector(".appamada-modal").textContent,
+      /通信不具合中。現時点の難易度表データ取得できません/);
+    first.window.document.querySelector('[data-level="13-"]').click();
+    first.window.document.querySelector(".appamada-submit").click();
+    await until(() => first.window.document.querySelector(".appamada-submit").textContent.includes("保存済み"));
+    assert.equal(posted.length, 0);
+    const saved = [...values.entries()].find(([key]) => key.includes("entry."))[1];
+    assert.equal(saved.payload.client_version, "0.4.7");
+    first.window.dispatchEvent(new first.window.Event("pagehide"));
+    first.window.close();
+    time += 30_001;
+    const second = page(false);
+    await until(() => [...values.keys()].some((key) => key.includes("receipt.")));
+    assert.equal(posted.length, 1);
+    assert.deepEqual(posted[0], saved.payload);
+    second.window.dispatchEvent(new second.window.Event("pagehide"));
+    second.window.close();
+  }
 });
