@@ -8,11 +8,14 @@ function sha256Hex_(value) {
   }).join("");
 }
 
-function enforceRateLimit_(payload, config) {
+function enforceRateLimit_(payload, config, sourceHash) {
   var now = Date.now();
   var windowMs = config.rateWindowSeconds * 1000;
   var bucket = Math.floor(now / windowMs);
-  var userHash = sha256Hex_(payload.bmsir_user_name);
+  if (typeof sourceHash !== "string" || !/^[0-9a-f]{64}$/.test(sourceHash)) {
+    throwApiError_("GATEWAY_AUTH_REQUIRED", "A verified submission source is required");
+  }
+  var userHash = sourceHash;
   var cache = CacheService.getScriptCache();
   var limits = [
     { key: "rate:g:" + bucket, limit: config.globalLimit },

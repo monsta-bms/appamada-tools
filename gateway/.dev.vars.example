@@ -1,0 +1,4 @@
+# Local-only configuration. Keep real values in ignored .dev.vars or Cloudflare secrets.
+# Leave these empty until a test GAS deployment and a random shared key are supplied.
+GAS_API_URL=""
+GATEWAY_SHARED_SECRET=""

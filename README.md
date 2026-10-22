@@ -12,7 +12,13 @@ BMS難易度表「不放逸」とBMSIRを連携するUserscriptの開発リポ�
 - Phase 3: 管理者承認、kkj順序維持、Developer Metadata recovery
 - Phase 4: 本番Standalone API、管理処理、キルスイッチ、production Userscript
 
-Phase 4でproduction導入済みです。運用は[Phase 3 管理者承認](docs/phase3-admin.md)と[Phase 4 production rollout](docs/phase4-production.md)を参照してください。本番識別子はsourceやdocsへ保存せず、production Web App URLだけを公開dist生成時に注入します。
+Phase 4でproduction導入済みです。運用は[Phase 3 管理者承認](docs/phase3-admin.md)と[Phase 4 production rollout](docs/phase4-production.md)を参照してください。非公開の本番識別子はsourceやdocsへ保存せず、公開受付URLをdist生成時に注入します。
+
+### 0.4.8
+
+申請受付の連続送信対策を強化し、開発用依存関係を更新しました。新規譜面・難易度変更・削除の申請と、ブラウザへ保存した提案を引き続き利用できます。
+
+既に導入済みの場合は、同じブラウザとUserscriptマネージャーで[公開Userscript](https://raw.githubusercontent.com/monsta-bms/appamada-tools/main/dist/appamada_bmsir_submit.user.js)を0.4.8以降へ更新してください。スクリプトや保存データを削除する必要はありません。新しい申請受付先への接続許可を求められた場合は承認し、ログイン中のBMSIR譜面ページを再読み込みしてください。旧版は更新まで送信待ちとなり、保存済みの提案は更新後に同じ内容で再送されます。
 
 ### 0.4.7
 
@@ -34,6 +40,11 @@ BMS-IRの現行譜面ページ構造に対応し、曲名・artistの右クリ�
 
 ## 開発
 
+### 申請受付の保護（0.4.8）
+
+公開版は0.4.8です。署名を検証する受付API、必要な設定、互換性、検証手順と実環境での確認範囲は[申請受付の保護](docs/security-gateway.md)を参照してください。
+開発用の候補は`.local`へ生成し、通常の申請・管理処理・保存済み提案とあわせて検証します。
+
 対応するNode.jsを用意し、依存関係を導入します。
 
 ```sh
@@ -54,21 +65,21 @@ npm run build
 npm run smoke
 ```
 
-通常の`npm run build`は安全なplaceholder URLを使ってgit管理外の`.local/appamada_bmsir_submit.public-check.user.js`へ生成し、`npm run smoke`で公開distとの差分がAPI URLだけであること、metadata、構文、起動時通信を検査します。これにより`npm run check`はtracked public distを変更しません。
+通常の`npm run build`は安全なplaceholder URLを使ってgit管理外の`.local/appamada_bmsir_submit.public-check.user.js`へ生成し、`npm run smoke`でmetadata、構文、起動時通信、保存済み提案の再送を検査します。公開distは、受付URLと対応する接続許可以外が現行候補と一致することも確認します。`npm run check`はtracked public distを変更しません。ソースを変更した場合は、公開前に`build:public`でdistを再生成してから最終検査してください。
 
 公開releaseを明示的に再生成する場合だけ`npm run build:public`を使用します。公開生成物は`dist/appamada_bmsir_submit.user.js`です。
 
 ## Production release
 
-公開distはproduction Web App URLを環境変数から注入して明示生成します。
+公開distは申請受付WorkerのURLを環境変数から注入して明示生成します。
 
 ```powershell
-$env:APPAMADA_API_URL = "https://script.google.com/macros/s/PRODUCTION_DEPLOYMENT_ID/exec"
+$env:APPAMADA_API_URL = "https://appamada-submission-gateway.monsta3228gsl.workers.dev/api"
 npm.cmd run build:public
 npm.cmd run smoke
 ```
 
-生成物は`dist/appamada_bmsir_submit.user.js`です。API URL未設定またはGoogle Web App以外のURLではbuildが失敗します。
+生成物は`dist/appamada_bmsir_submit.user.js`です。0.4.8以降の公開生成には設定済み受付WorkerのHTTPS `/api` URLが必要です。本番へ反映する前に[切替の前提](docs/security-gateway.md)を確認してください。
 
 ## Phase 2テストUserscript
 

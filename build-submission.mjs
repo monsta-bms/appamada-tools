@@ -9,8 +9,9 @@ function validateApiUrl(value) {
     const url = new URL(value);
     return (
       url.protocol === "https:" &&
-      url.hostname === "script.google.com" &&
-      /^\/macros\/s\/[^/]+\/exec$/.test(url.pathname) &&
+      !url.username && !url.password &&
+      ((url.hostname === "script.google.com" && /^\/macros\/s\/[^/]+\/exec$/.test(url.pathname)) ||
+        (/^[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev$/.test(url.hostname) && url.pathname === "/api")) &&
       !url.search &&
       !url.hash
     );
@@ -23,19 +24,23 @@ export async function buildSubmission({ apiUrl, clientVersion, metadataPath, out
   const normalizedApiUrl = String(apiUrl ?? "").trim();
   if (!validateApiUrl(normalizedApiUrl)) {
     throw new Error(
-      "APPAMADA_API_URL must be an https://script.google.com/macros/s/.../exec URL",
+      "APPAMADA_API_URL must be an HTTPS Apps Script exec or a workers.dev /api gateway URL",
     );
   }
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(clientVersion)) {
     throw new Error("Invalid client version");
   }
 
-  const metadata = (await readFile(new URL(metadataPath, import.meta.url), "utf8")).trimEnd();
+  let metadata = (await readFile(new URL(metadataPath, import.meta.url), "utf8")).trimEnd();
   if (!metadata.startsWith("// ==UserScript==") || !metadata.endsWith("// ==/UserScript==")) {
     throw new Error("Invalid Userscript metadata block");
   }
   if (!metadata.includes(`// @version      ${clientVersion}`)) {
     throw new Error("Userscript metadata version does not match client version");
+  }
+  const apiHostname = new URL(normalizedApiUrl).hostname;
+  if (apiHostname !== "script.google.com") {
+    metadata = metadata.replace("// @run-at", `// @connect      ${apiHostname}\n// @run-at`);
   }
 
   await mkdir(new URL("./.local/", import.meta.url), { recursive: true });

@@ -1,9 +1,12 @@
-function submitApplication_(rawPayload) {
+function submitApplication_(rawPayload, sourceHash) {
   var propertyValues = PropertiesService.getScriptProperties().getProperties();
   if (!isSubmitEnabled_(propertyValues)) {
     throwApiError_("SUBMISSIONS_DISABLED", "Application submissions are disabled");
   }
   var payload = validatePayload_(rawPayload);
+  if (typeof sourceHash !== "string" || !/^[0-9a-f]{64}$/.test(sourceHash)) {
+    throwApiError_("GATEWAY_AUTH_REQUIRED", "A verified submission source is required");
+  }
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) {
     throwApiError_("LOCK_TIMEOUT", "Could not acquire ScriptLock", {
@@ -27,7 +30,6 @@ function submitApplication_(rawPayload) {
       return { ok: true, request_id: payload.request_id, deduplicated: true };
     }
 
-    enforceRateLimit_(payload, config);
     var lookup = lookupChartByMd5_(payload.md5, false, config, spreadsheet);
     var chart = lookup.chart;
     if (payload.application_type === "change" || payload.application_type === "delete") {
@@ -50,6 +52,9 @@ function submitApplication_(rawPayload) {
     var row = createApplicationRow_(payload, chart, config, {
       deletedDuplicate: deletedDuplicate,
     });
+    // Invalid submissions do not consume the shared accepted-submission quota.
+    // The gateway independently limits all attempts using the trusted source IP.
+    enforceRateLimit_(payload, config, sourceHash);
     appendApplicationRowRaw_(applicationSheet, row, config);
     return { ok: true, request_id: payload.request_id, deduplicated: false };
   } finally {

@@ -3,9 +3,13 @@ import { isAllowedLevel } from "./levels.js";
 export const OFFLINE_NOTICE = "通信不具合中。現時点の難易度表データ取得できません";
 const PREFIX = "appamada.outbox.v1.";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const LEGACY_GATEWAY_REJECTIONS = new Set([
+  "GATEWAY_AUTH_REQUIRED", "GATEWAY_NOT_CONFIGURED", "GATEWAY_SOURCE_REQUIRED", "GATEWAY_UNAVAILABLE",
+]);
 const TRANSIENT = new Set([
   "API_NETWORK_ERROR", "API_TIMEOUT", "API_INVALID_RESPONSE", "LOCK_TIMEOUT",
   "RATE_LIMITED", "WRITE_FAILED", "INTERNAL_ERROR", "SUBMISSIONS_DISABLED",
+  ...LEGACY_GATEWAY_REJECTIONS,
 ]);
 const COMMON_FIELDS = [
   "application_type", "request_id", "md5", "proposed_level", "comment",
@@ -101,8 +105,14 @@ export function createOutbox({
     if (receipt && (receipt.request_id !== id || !Number.isFinite(receipt.sentAt) || typeof receipt.deduplicated !== "boolean")) {
       throw new OutboxError("OUTBOX_INVALID_DATA");
     }
-    return clone({ ...entry, ...state, status: receipt ? "sent" : state?.status ?? "pending",
-      attempts: state?.attempts ?? 0, nextAttemptAt: state?.nextAttemptAt ?? entry.notBefore, receipt });
+    // Older clients treated these temporary gateway failures as permanent.
+    // Recover only valid, unacknowledged proposals with their original request
+    // ID; normal dispatch persists the next attempt and server dedup stays valid.
+    const recoverGatewayRejection = !receipt && state?.status === "rejected" &&
+      LEGACY_GATEWAY_REJECTIONS.has(state.errorCode);
+    return clone({ ...entry, ...state, status: receipt ? "sent" : recoverGatewayRejection ? "pending" : state?.status ?? "pending",
+      attempts: state?.attempts ?? 0,
+      nextAttemptAt: recoverGatewayRejection ? 0 : state?.nextAttemptAt ?? entry.notBefore, receipt });
   }
   async function list() {
     let keys;

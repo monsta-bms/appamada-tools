@@ -61,14 +61,26 @@ function doPost(e) {
   var requestId = "";
   try {
     var contents = e && e.postData ? e.postData.contents : "";
-    if (!contents) throwApiError_("BAD_REQUEST", "POST body is required");
+    if (!contents || contents.length > 65536) throwApiError_("BAD_REQUEST", "POST body is missing or too large");
     try {
       rawPayload = JSON.parse(contents);
     } catch (error) {
       throwApiError_("BAD_REQUEST", "POST body must be valid JSON");
     }
+    if (!isSubmitEnabled_()) throwApiError_("SUBMISSIONS_DISABLED", "Application submissions are disabled");
+    // Published clients keep SUBMISSIONS_DISABLED requests pending for retry.
+    // Reject their direct format without permanently discarding saved proposals.
+    if (
+      rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload) &&
+      !Object.prototype.hasOwnProperty.call(rawPayload, "gateway_version") &&
+      ["new", "change", "delete"].indexOf(rawPayload.application_type) !== -1
+    ) {
+      throwApiError_("SUBMISSIONS_DISABLED", "Direct submissions are disabled; update the Userscript");
+    }
+    var verified = verifyGatewayEnvelope_(rawPayload);
+    rawPayload = verified.payload;
     requestId = rawPayload && typeof rawPayload.request_id === "string" ? rawPayload.request_id : "";
-    var result = submitApplication_(rawPayload);
+    var result = submitApplication_(rawPayload, verified.sourceHash);
     logDiagnostic_({
       request_id: result.request_id,
       action: "submit",

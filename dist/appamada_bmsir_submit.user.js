@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         不放逸 BMSIR申請
 // @namespace    https://github.com/monsta-bms/appamada-tools
-// @version      0.4.7
+// @version      0.4.8
 // @description  BMSIRから不放逸への譜面申請を補助します
 // @match        https://bms-ir.org/new/song*
 // @match        https://www.bms-ir.org/new/song*
@@ -17,6 +17,7 @@
 // @grant        GM_listValues
 // @connect      script.google.com
 // @connect      script.googleusercontent.com
+// @connect      appamada-submission-gateway.monsta3228gsl.workers.dev
 // @run-at       document-idle
 // @noframes
 // @updateURL    https://raw.githubusercontent.com/monsta-bms/appamada-tools/main/dist/appamada_bmsir_submit.user.js
@@ -50,7 +51,7 @@
     }
     try {
       const url = new URL(apiUrl);
-      if (url.protocol !== "https:" || url.hostname !== "script.google.com" || !/^\/macros\/s\/[^/]+\/exec$/.test(url.pathname) || url.search || url.hash) {
+      if (url.protocol !== "https:" || url.username || url.password || !(url.hostname === "script.google.com" && /^\/macros\/s\/[^/]+\/exec$/.test(url.pathname) || /^[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev$/.test(url.hostname) && url.pathname === "/api") || url.search || url.hash) {
         throw new Error("invalid URL");
       }
       return url.toString();
@@ -517,6 +518,12 @@
   var OFFLINE_NOTICE = "通信不具合中。現時点の難易度表データ取得できません";
   var PREFIX2 = "appamada.outbox.v1.";
   var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  var LEGACY_GATEWAY_REJECTIONS = /* @__PURE__ */ new Set([
+    "GATEWAY_AUTH_REQUIRED",
+    "GATEWAY_NOT_CONFIGURED",
+    "GATEWAY_SOURCE_REQUIRED",
+    "GATEWAY_UNAVAILABLE"
+  ]);
   var TRANSIENT = /* @__PURE__ */ new Set([
     "API_NETWORK_ERROR",
     "API_TIMEOUT",
@@ -525,7 +532,8 @@
     "RATE_LIMITED",
     "WRITE_FAILED",
     "INTERNAL_ERROR",
-    "SUBMISSIONS_DISABLED"
+    "SUBMISSIONS_DISABLED",
+    ...LEGACY_GATEWAY_REJECTIONS
   ]);
   var COMMON_FIELDS = [
     "application_type",
@@ -627,12 +635,13 @@
       if (receipt && (receipt.request_id !== id || !Number.isFinite(receipt.sentAt) || typeof receipt.deduplicated !== "boolean")) {
         throw new OutboxError("OUTBOX_INVALID_DATA");
       }
+      const recoverGatewayRejection = !receipt && state?.status === "rejected" && LEGACY_GATEWAY_REJECTIONS.has(state.errorCode);
       return clone({
         ...entry,
         ...state,
-        status: receipt ? "sent" : state?.status ?? "pending",
+        status: receipt ? "sent" : recoverGatewayRejection ? "pending" : state?.status ?? "pending",
         attempts: state?.attempts ?? 0,
-        nextAttemptAt: state?.nextAttemptAt ?? entry.notBefore,
+        nextAttemptAt: recoverGatewayRejection ? 0 : state?.nextAttemptAt ?? entry.notBefore,
         receipt
       });
     }
@@ -848,6 +857,10 @@
     API_INVALID_RESPONSE: "サーバーから正しい応答を取得できませんでした。",
     API_NOT_CONFIGURED: "申請APIが設定されていません。",
     SUBMISSIONS_DISABLED: "現在、不放逸への申請受付を一時停止しています。",
+    GATEWAY_NOT_CONFIGURED: "申請受付の準備が整っていません。時間を置いてお試しください。",
+    GATEWAY_AUTH_REQUIRED: "申請用Userscriptを最新版へ更新してください。保存した提案は保持されています。",
+    GATEWAY_SOURCE_REQUIRED: "送信元を確認できませんでした。時間を置いてお試しください。",
+    GATEWAY_UNAVAILABLE: "申請受付へ接続できませんでした。時間を置いてお試しください。",
     BAD_REQUEST: "送信内容を確認できませんでした。",
     APPLICATION_TYPE_INVALID: "申請種別が正しくありません。",
     LOGIN_NAME_MISSING: "BMSIRのログインユーザー名を取得できませんでした。",
@@ -1512,7 +1525,7 @@
   }
 
   // src/submission-main.js
-  var CLIENT_VERSION = "0.4.7";
+  var CLIENT_VERSION = "0.4.8";
   var DEBUG = false;
   var logger = createLogger({ debug: DEBUG });
   var parseResult = parseBmsirPage(document, location.href);
@@ -1524,7 +1537,7 @@
   } else {
     try {
       const apiClient = createApiClient({
-        apiUrl: "https://script.google.com/macros/s/AKfycbw6dwFnKUnEC__0yzpVduEOSWAIhQiNngisPf7dU5zMZFx0Vgm-UHxipeS-pDZdwyKR/exec",
+        apiUrl: "https://appamada-submission-gateway.monsta3228gsl.workers.dev/api",
         gmRequest: GM_xmlhttpRequest
       });
       const storage = createGmStorage({

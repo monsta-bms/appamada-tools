@@ -7,3 +7,7 @@ node_modules/
 credentials*
 secrets*
 *.log
+**/.dev.vars
+**/.dev.vars.*
+!**/.dev.vars.example
+**/.wrangler/

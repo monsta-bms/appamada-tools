@@ -28,9 +28,9 @@ function validateApiUrl(apiUrl) {
   try {
     const url = new URL(apiUrl);
     if (
-      url.protocol !== "https:" ||
-      url.hostname !== "script.google.com" ||
-      !/^\/macros\/s\/[^/]+\/exec$/.test(url.pathname) ||
+      url.protocol !== "https:" || url.username || url.password ||
+      !((url.hostname === "script.google.com" && /^\/macros\/s\/[^/]+\/exec$/.test(url.pathname)) ||
+        (/^[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev$/.test(url.hostname) && url.pathname === "/api")) ||
       url.search ||
       url.hash
     ) {

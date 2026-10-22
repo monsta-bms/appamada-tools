@@ -256,3 +256,153 @@ test("client extra fields and altered immutable payload are rejected before send
   await assert.rejects(state.outbox.enqueue(payload("change", { comment: "changed" }), metadata), { code: "OUTBOX_CONFLICT" });
   assert.equal(state.calls.length, 0);
 });
+
+test("gateway setup or auth errors preserve queued proposals for later retry", async () => {
+  for (const code of ["GATEWAY_AUTH_REQUIRED", "GATEWAY_NOT_CONFIGURED", "GATEWAY_SOURCE_REQUIRED", "GATEWAY_UNAVAILABLE"]) {
+    const state = setup({ apiClient: { async submit() { return { ok: false, error: { code } }; } } });
+    const p = payload();
+    await state.outbox.enqueue(p, metadata);
+    await state.outbox.send(id());
+    const entries = await state.make().list();
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].status, "pending");
+    assert.deepEqual(entries[0].payload, p);
+  }
+});
+
+test("legacy gateway rejections recover after reload and submit the identical saved proposal once", async () => {
+  for (const code of ["GATEWAY_AUTH_REQUIRED", "GATEWAY_NOT_CONFIGURED", "GATEWAY_SOURCE_REQUIRED", "GATEWAY_UNAVAILABLE"]) {
+    const server = await createAppsScriptHarness({ kkjRows: [["10", "Title", "Artist", MD5, ""]] });
+    const bodies = [];
+    const state = setup({ apiClient: { async submit(body) {
+      bodies.push(structuredClone(body));
+      return server.post(body);
+    } } });
+    const original = payload();
+    const saved = await state.outbox.enqueue(original, metadata);
+    const stateKey = `appamada.outbox.v1.state.${id()}`;
+    const rejected = { status: "rejected", attempts: 3, nextAttemptAt: 999_999, errorCode: code };
+    await state.storage.set(stateKey, rejected);
+    const beforeRead = structuredClone([...state.storage.values]);
+
+    const reloaded = state.make();
+    const [recovered] = await reloaded.list();
+    assert.equal(recovered.status, "pending", code);
+    assert.equal(recovered.nextAttemptAt, 0);
+    assert.equal(recovered.attempts, 3);
+    assert.equal(recovered.createdAt, saved.createdAt);
+    assert.equal(recovered.notBefore, saved.notBefore);
+    assert.deepEqual(recovered.metadata, metadata);
+    assert.deepEqual(recovered.payload, original);
+    assert.deepEqual([...state.storage.values], beforeRead, "reading must not rewrite stored data");
+    assert.deepEqual(bodies, []);
+
+    const [result] = await reloaded.flush();
+    assert.equal(result.status, "sent");
+    assert.equal(result.attempts, 4);
+    assert.deepEqual(bodies, [original]);
+    assert.equal(server.applications().length, 1);
+    assert.equal(server.applications()[0][15], original.request_id);
+    assert.equal(server.applications()[0][16], "0.4.7");
+    await state.make().flush();
+    assert.equal(bodies.length, 1);
+    assert.equal(server.applications().length, 1);
+  }
+});
+
+test("legacy recovery leaves normal and unknown permanent rejections unchanged", async () => {
+  for (const code of ["CHART_ALREADY_EXISTS", "CHART_NOT_FOUND", "SAME_AS_CURRENT", "BAD_REQUEST",
+    "API_NETWORK_ERROR", "RATE_LIMITED", "GATEWAY_UNKNOWN", "GATEWAY_AUTH_REQUIRED_EXTRA"]) {
+    const state = setup();
+    await state.outbox.enqueue(payload(), metadata);
+    const rejected = { status: "rejected", attempts: 2, nextAttemptAt: 987_654, errorCode: code };
+    await state.storage.set(`appamada.outbox.v1.state.${id()}`, rejected);
+    const beforeRead = structuredClone([...state.storage.values]);
+    const reloaded = state.make();
+    const [entry] = await reloaded.list();
+    assert.equal(entry.status, "rejected", code);
+    assert.equal(entry.nextAttemptAt, rejected.nextAttemptAt);
+    assert.equal((await reloaded.send(id())).status, "rejected");
+    assert.deepEqual(await reloaded.flush({ manual: true }), []);
+    assert.deepEqual([...state.storage.values], beforeRead);
+    assert.equal(state.calls.length, 0);
+  }
+});
+
+test("a sent receipt takes precedence over a legacy gateway rejection", async () => {
+  const state = setup();
+  await state.outbox.enqueue(payload(), metadata);
+  await state.storage.set(`appamada.outbox.v1.state.${id()}`,
+    { status: "rejected", attempts: 4, nextAttemptAt: 0, errorCode: "GATEWAY_AUTH_REQUIRED" });
+  const receipt = { request_id: id(), sentAt: 500, deduplicated: true };
+  await state.storage.set(`appamada.outbox.v1.receipt.${id()}`, receipt);
+  const beforeRead = structuredClone([...state.storage.values]);
+  const reloaded = state.make();
+  const [entry] = await reloaded.list();
+  assert.equal(entry.status, "sent");
+  assert.deepEqual(entry.receipt, receipt);
+  assert.equal((await reloaded.send(id())).status, "sent");
+  assert.deepEqual(await reloaded.flush(), []);
+  assert.equal(state.calls.length, 0);
+  assert.deepEqual([...state.storage.values], beforeRead);
+});
+
+test("legacy recovery preserves other accounts and cancelled proposals without sending", async () => {
+  for (const excluded of ["other-account", "cancelled"]) {
+    const state = setup();
+    await state.outbox.enqueue(payload(), metadata);
+    await state.storage.set(`appamada.outbox.v1.state.${id()}`,
+      { status: "rejected", attempts: 1, nextAttemptAt: 0, errorCode: "GATEWAY_UNAVAILABLE" });
+    if (excluded === "cancelled") await state.storage.set(`appamada.outbox.v1.cancelled.${id()}`, true);
+    const beforeRead = structuredClone([...state.storage.values]);
+    const reloaded = state.make(excluded === "other-account" ? { playerId: "190072" } : {});
+    assert.deepEqual(await reloaded.list(), []);
+    assert.deepEqual(await reloaded.flush({ manual: true }), []);
+    assert.equal((await reloaded.send(id())).status, "missing");
+    assert.equal(state.calls.length, 0);
+    assert.deepEqual([...state.storage.values], beforeRead);
+  }
+});
+
+test("legacy recovery validates saved payload and attempt state before making a proposal retryable", async () => {
+  for (const invalid of ["payload", "state"]) {
+    const state = setup();
+    await state.outbox.enqueue(payload(), metadata);
+    await state.storage.set(`appamada.outbox.v1.state.${id()}`, {
+      status: "rejected", attempts: invalid === "state" ? -1 : 2,
+      nextAttemptAt: 0, errorCode: "GATEWAY_SOURCE_REQUIRED",
+    });
+    if (invalid === "payload") {
+      const entryKey = `appamada.outbox.v1.entry.${id()}`;
+      const corrupted = await state.storage.get(entryKey);
+      corrupted.payload.md5 = "invalid";
+      await state.storage.set(entryKey, corrupted);
+    }
+    const beforeRead = structuredClone([...state.storage.values]);
+    await assert.rejects(state.make().flush(), { code: "OUTBOX_INVALID_DATA" });
+    assert.equal(state.calls.length, 0);
+    assert.deepEqual([...state.storage.values], beforeRead);
+  }
+});
+
+test("legacy recovery never resets pending backoff or bypasses an active rate-limit pause", async () => {
+  const state = setup();
+  await state.outbox.enqueue(payload(), metadata);
+  const stateKey = `appamada.outbox.v1.state.${id()}`;
+  await state.storage.set(stateKey,
+    { status: "pending", attempts: 2, nextAttemptAt: 61_000, errorCode: "GATEWAY_UNAVAILABLE" });
+  const [pending] = await state.make().list();
+  assert.equal(pending.nextAttemptAt, 61_000);
+  await state.make().flush();
+  assert.equal(state.calls.length, 0);
+
+  await state.storage.set(stateKey,
+    { status: "rejected", attempts: 2, nextAttemptAt: 0, errorCode: "GATEWAY_UNAVAILABLE" });
+  await state.storage.set("appamada.outbox.v1.pause.123456",
+    { until: 61_000, errorCode: "RATE_LIMITED" });
+  await state.make().flush({ manual: true });
+  assert.equal(state.calls.length, 0);
+  state.advance(60_001);
+  assert.equal((await state.make().flush())[0].status, "sent");
+  assert.equal(state.calls.length, 1);
+});

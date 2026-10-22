@@ -1,0 +1,13 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "appamada-submission-gateway",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-22",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [{ "name": "SOURCE_LIMITER", "class_name": "SourceRateLimiter" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SourceRateLimiter"] }],
+  "secrets": { "required": ["GATEWAY_SHARED_SECRET", "GAS_API_URL"] }
+}

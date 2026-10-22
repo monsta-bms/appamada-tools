@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
@@ -13,6 +13,7 @@ const DELETED_HEADERS = ["level", "title", "artist", "md5", "comment"];
 const SOURCE_FILES = [
   "Config.gs",
   "Validation.gs",
+  "Gateway.gs",
   "Logging.gs",
   "Lookup.gs",
   "RateLimit.gs",
@@ -201,6 +202,7 @@ export async function createAppsScriptHarness({
   const scriptProperties = new Map(Object.entries({
     SPREADSHEET_ID: "test-spreadsheet",
     SUBMIT_ENABLED: "true",
+    GATEWAY_SHARED_SECRET: "local-test-gateway-secret-not-for-production-123456",
     ...properties,
   }));
   const rawWrites = [];
@@ -268,6 +270,9 @@ export async function createAppsScriptHarness({
       computeDigest(_algorithm, value) {
         return [...createHash("sha256").update(String(value)).digest()];
       },
+      computeHmacSha256Signature(value, key) {
+        return [...createHmac("sha256", key).update(value).digest()];
+      },
       formatDate(date, _timezone, format) {
         if (format === "yyyy/MM/dd HH:mm:ss") return "2026/08/11 12:34:56";
         return date.toISOString();
@@ -303,7 +308,17 @@ export async function createAppsScriptHarness({
       );
       return JSON.parse(context.doGet({ parameters: mapped }).getContent());
     },
-    post(payload) {
+    post(payload, sourceHash = "1".repeat(64)) {
+      const issuedAt = Date.now();
+      const body = JSON.stringify(payload);
+      const message = "appamada-gateway-v1\n" + issuedAt + "\n" + sourceHash + "\n" + body;
+      const signature = createHmac("sha256", scriptProperties.get("GATEWAY_SHARED_SECRET") || "")
+        .update(message).digest("hex");
+      return JSON.parse(context.doPost({ postData: { contents: JSON.stringify({
+        gateway_version: 1, issued_at: issuedAt, source_hash: sourceHash, payload: body, signature,
+      }) } }).getContent());
+    },
+    postRaw(payload) {
       return JSON.parse(
         context.doPost({ postData: { contents: JSON.stringify(payload) } }).getContent(),
       );
