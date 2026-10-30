@@ -24,7 +24,7 @@ function submitApplication_(rawPayload, sourceHash) {
       var existingRow = applicationSheet
         .getRange(existingRowNumber, 1, 1, APPAMADA_APPLICATION_HEADERS.length)
         .getValues()[0];
-      if (!storedRequestMatches_(existingRow, payload)) {
+      if (!storedRequestMatches_(existingRow, payload, applicationSheet.getRange(existingRowNumber, 16).getNote())) {
         throwApiError_("REQUEST_ID_CONFLICT", "request_id payload differs from stored request");
       }
       return { ok: true, request_id: payload.request_id, deduplicated: true };
@@ -55,7 +55,7 @@ function submitApplication_(rawPayload, sourceHash) {
     // Invalid submissions do not consume the shared accepted-submission quota.
     // The gateway independently limits all attempts using the trusted source IP.
     enforceRateLimit_(payload, config, sourceHash);
-    appendApplicationRowRaw_(applicationSheet, row, config);
+    appendApplicationRowRaw_(applicationSheet, row, config, payload);
     return { ok: true, request_id: payload.request_id, deduplicated: false };
   } finally {
     lock.releaseLock();

@@ -1,7 +1,7 @@
 import { createApiClient } from "./api-client.js";
 import { collectDomDiagnostics, parseBmsirPage } from "./bmsir-parser.js";
 import { createLogger } from "./logger.js";
-import { installSubmissionUi } from "./ui.js";
+import { installSubmissionUi, showSubmissionUnavailable } from "./ui.js";
 import { createGmStorage, createOutbox, startOutboxSync } from "./outbox.js";
 
 const CLIENT_VERSION = __APPAMADA_CLIENT_VERSION__;
@@ -10,6 +10,7 @@ const logger = createLogger({ debug: DEBUG });
 const parseResult = parseBmsirPage(document, location.href);
 
 if (!parseResult.ok) {
+  showSubmissionUnavailable(document, location.href, parseResult.error);
   logger.warn("PARSE_FAILED", {
     code: parseResult.error,
     ...collectDomDiagnostics(document, location.href),
@@ -51,5 +52,6 @@ if (!parseResult.ok) {
     });
   } catch (error) {
     logger.warn("SUBMISSION_INIT_FAILED", error?.code ?? "INTERNAL_ERROR");
+    showSubmissionUnavailable(document, location.href, error?.code ?? "INTERNAL_ERROR");
   }
 }

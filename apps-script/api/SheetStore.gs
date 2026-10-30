@@ -78,7 +78,23 @@ function findRequestRow_(sheet, requestId) {
   return matches.length === 1 ? matches[0].getRow() : null;
 }
 
-function storedRequestMatches_(row, payload) {
+function requestFingerprint_(payload) {
+  var fields = ["application_type", "request_id", "md5", "proposed_level", "comment",
+    "bmsir_user_name", "bmsir_player_id", "ir_url", "client_version"];
+  if (payload.application_type === "new") fields = fields.concat(["title", "artist"]);
+  return sha256Hex_(JSON.stringify(fields.map(function (field) { return payload[field]; })));
+}
+
+function storedRequestMatches_(row, payload, note) {
+  var lines = String(note || "").split(/\r?\n/).filter(function (line) {
+    return line.indexOf("appamada-request-") === 0;
+  });
+  if (lines.length) {
+    // An unknown/corrupt marker must not fall back to mutable display cells.
+    return lines.length === 1 && lines[0] === "appamada-request-v1:" + requestFingerprint_(payload);
+  }
+  // Existing rows have no immutable fingerprint. Preserve their original
+  // comparison contract; never invent an original payload from edited cells.
   function equal(index, value) {
     return String(row[index] === null || row[index] === undefined ? "" : row[index]) === String(value);
   }
@@ -124,10 +140,24 @@ function createApplicationRow_(payload, chart, config, options) {
   ];
 }
 
-function appendApplicationRowRaw_(sheet, row, config) {
+function appendApplicationRowRaw_(sheet, row, config, payload) {
   var rowNumber = Math.max(sheet.getLastRow() + 1, 2);
   var range = "'" + config.applicationSheetName.replace(/'/g, "''") + "'!A" + rowNumber + ":S" + rowNumber;
   try {
+    var requestCell = sheet.getRange(rowNumber, 16);
+    var oldNote = String(requestCell.getNote() || "");
+    var noteLines = oldNote.split(/\r?\n/).filter(function (line) {
+      return line && line.indexOf("appamada-request-v1:") !== 0;
+    });
+    if (noteLines.some(function (line) { return line.indexOf("appamada-request-") === 0; })) {
+      throw new Error("Unknown request fingerprint format");
+    }
+    // Persist before the RAW row: an accepted new row always has its original
+    // fingerprint, even if execution/response is lost immediately after append.
+    // Both operations are inside the caller's ScriptLock. A failed row write
+    // leaves only a harmless note on an otherwise unused row, safe to retry.
+    requestCell.setNote(noteLines.concat(["appamada-request-v1:" + requestFingerprint_(payload)]).join("\n"));
+    SpreadsheetApp.flush();
     Sheets.Spreadsheets.Values.update(
       { values: [row] },
       config.spreadsheetId,

@@ -1,4 +1,4 @@
-import { ApiClientError } from "./api-client.js";
+import { ApiClientError, matchesRequestId } from "./api-client.js";
 import { codePointLength, resolveSongElements } from "./bmsir-parser.js";
 import { OFFLINE_NOTICE, isCommunicationError } from "./outbox.js";
 import {
@@ -49,9 +49,21 @@ const ERROR_MESSAGES = Object.freeze({
   INTERNAL_ERROR: "サーバー内部でエラーが発生しました。",
   OUTBOX_STORAGE_UNAVAILABLE: "保存した提案の読み書きができませんでした。保存権限や空き容量を確認してください。送信状況は「保存した提案」で確認してください。",
   OUTBOX_INVALID_DATA: "保存した提案を読み取れませんでした。データは削除していません。",
-  OUTBOX_FULL: "保存件数が上限に達しました。保存した提案から送信済み・受付不可の項目を消してください。",
+  OUTBOX_REVIEW_REQUIRED: "保存データの確認が必要です。原本を残し、自動送信を止めています。控えを保存して管理者へご相談ください。",
+  OUTBOX_KEY_INVALID: "保存データの識別子または保存形式を確認できません。",
+  OUTBOX_VERSION_UNSUPPORTED: "この版では読めない保存形式です。対応するUserscriptでの確認が必要です。",
+  OUTBOX_METADATA_INVALID: "保存日時または曲名・artistの保存情報を確認できません。",
+  OUTBOX_PAYLOAD_INVALID: "保存された申請内容の形式を確認できません。",
+  OUTBOX_PAYLOAD_UNSUPPORTED: "以前の申請内容が現在の受付条件に合いません。内容を自動変更せず保全しています。",
+  OUTBOX_STATE_INVALID: "過去の送信状態を確認できません。未送信とは扱いません。",
+  OUTBOX_STATE_UNCERTAIN: "通信失敗と受付不可の記録が矛盾しています。受付状況が不明なため、原本を保全して自動送信を止めています。",
+  OUTBOX_RECEIPT_INVALID: "送信結果の記録を確認できません。未送信とは扱いません。",
+  OUTBOX_CANCELLATION_INVALID: "保存取消の記録を確認できません。自動送信は行いません。",
+  OUTBOX_PAUSE_INVALID: "投稿間隔の待機記録を確認できません。安全のため再送を止め、原本を残しています。控えを保存して管理者へご相談ください。",
+  OUTBOX_FULL: "送信待ち・送信結果未確定の提案が上限200件に達しました。完了控えや要確認データは別に保持しています。",
   OUTBOX_CONFLICT: "同じ申請の保存内容が一致しません。保存した提案を確認してください。",
   OUTBOX_CANNOT_CANCEL: "送信を試みた提案は、受け付けられた可能性があるため取り消せません。",
+  OUTBOX_CANCEL_UNSAFE: "複数ページ間で送信と取消の順序を保証できないため、この環境では未送信の保存取消を利用できません。",
   OUTBOX_BUSY: "保存した提案を送信中です。少し待ってください。",
 });
 
@@ -112,7 +124,42 @@ export function createRequestId(cryptoObject) {
 }
 
 export function errorMessageFor(code) {
-  return ERROR_MESSAGES[code] ?? "申請を処理できませんでした。時間を置いて再度お試しください。";
+  return Object.hasOwn(ERROR_MESSAGES, code) ? ERROR_MESSAGES[code]
+    : "申請を処理できませんでした。時間を置いて再度お試しください。";
+}
+
+export function retryDescription(entry, now = Date.now()) {
+  if (entry.status === "sent") return "申請を受け付けました。難易度表への反映・承認完了を示すものではありません。";
+  if (entry.status === "rejected") return "受付不可の控えです。自動で再送しません。控えの削除は申請の撤回ではありません。";
+  if (entry.status === "review" || entry.blocked) return "確認が必要なため自動送信しません。原本の控えを保存して確認してください。";
+  if (entry.manualOnly) return "自動再送は保留しています。設定や対応版を確認後、「送信待ちを再送」で再開できます。元の申請内容・識別子は変更しません。";
+  const time = new Date(entry.nextAttemptAt);
+  const next = entry.nextAttemptAt > now && Number.isFinite(time.getTime())
+    ? `次の自動再送は${time.toLocaleString("ja-JP")}以降です。` : "このページを開いている間、順番に自動再送します。";
+  if (entry.status === "sending") return `受付結果がまだ確定していません。取り消さず、同じ識別子で確認し直します。${next}`;
+  return `${entry.errorCode === "RATE_LIMITED" ? "投稿間隔の制限が終わるのを待っています。" : ""}${next}`;
+}
+
+export function showSubmissionUnavailable(document, pageUrl, code) {
+  let url;
+  try { url = new URL(pageUrl); } catch { return; }
+  if (url.protocol !== "https:" || !["bms-ir.org", "www.bms-ir.org"].includes(url.hostname) || url.pathname !== "/new/song") return;
+  const messages = {
+    NOT_LOGGED_IN: "不放逸の申請は、BMS-IRへログインすると利用できます。",
+    USER_DOM_INVALID: "ログイン情報の構造を確認できないため、不放逸の申請を開始できません。",
+    SONG_DOM_INVALID: "譜面ページの構造を確認できないため、不放逸の申請を開始できません。",
+    MD5_MISMATCH: "譜面の識別情報が一致しないため、不放逸の申請を開始できません。",
+    MD5_INVALID: "URLの譜面識別情報を確認できないため、不放逸の申請を開始できません。",
+  };
+  let notice = document.querySelector("[data-appamada-unavailable]");
+  if (!notice) {
+    notice = element(document, "p");
+    notice.dataset.appamadaUnavailable = "true";
+    notice.setAttribute("role", "status");
+    notice.style.cssText = "padding:8px;border:1px solid #888;background:#fff;color:#222;font:14px system-ui;";
+    document.body.append(notice);
+  }
+  notice.textContent = Object.hasOwn(messages, code) ? messages[code] : `不放逸の申請を開始できません。${errorMessageFor(code)}`;
 }
 
 export function installSubmissionUi({
@@ -264,7 +311,7 @@ export function installSubmissionUi({
         if (result.status === "sent") {
           statusContainer.replaceChildren(statusNode(document, "申請を送信しました。", "success"));
           button.textContent = "送信済み";
-        } else if (result.status === "rejected") {
+        } else if (["rejected", "review"].includes(result.status)) {
           statusContainer.replaceChildren(statusNode(document, errorMessageFor(result.errorCode), "error"));
           button.dataset.submitting = "false";
           button.textContent = offline ? "ブラウザに保存" : "申請を送信";
@@ -275,7 +322,7 @@ export function installSubmissionUi({
           const reason = result.errorCode && !isCommunicationError(result.errorCode)
             ? `${errorMessageFor(result.errorCode)} ` : "";
           statusContainer.replaceChildren(statusNode(document,
-            `${isCommunicationError(result.errorCode) ? `${OFFLINE_NOTICE}。 ` : ""}${reason}提案をブラウザに保存しました。まだ送信完了していません。通信が回復したら再送します。右クリックの「保存した提案」から確認できます。`));
+            `${isCommunicationError(result.errorCode) ? `${OFFLINE_NOTICE}。 ` : ""}${reason}提案をブラウザに保存しました。まだ送信完了していません。${retryDescription(result)}右クリックの「保存した提案」から確認できます。`));
           button.textContent = "保存済み（送信待ち）";
         }
         button.dataset.completed = "true";
@@ -284,6 +331,9 @@ export function installSubmissionUi({
       }
       const result = await apiClient.submit(payload);
       if (result.ok) {
+        if (!matchesRequestId(result.request_id, payload.request_id) || typeof result.deduplicated !== "boolean") {
+          throw new ApiClientError("API_INVALID_RESPONSE", "Mismatched acknowledgement");
+        }
         const message = result.deduplicated
           ? "この申請はすでに送信済みです。"
           : "申請を送信しました。";
@@ -582,12 +632,28 @@ export function installSubmissionUi({
     const items = element(document, "div");
     actions.append(retry, refresh, backup);
     shell.content.append(actions, status, items);
+    let refreshVersion = 0;
     async function updateList() {
+      const version = ++refreshVersion;
       try {
-        const entries = await outbox.list();
-        if (activeModal !== shell) return;
+        const { entries, issues, unidentifiedCount, queue } = await outbox.inspect();
+        if (activeModal !== shell || version !== refreshVersion) return;
         items.replaceChildren();
-        if (!entries.length) items.append(statusNode(document, "保存した提案はありません。"));
+        items.append(statusNode(document, `正常な提案：${entries.length}件 ／ 要確認：${issues.filter(issue => issue.blocked).length}件` +
+          (issues.some(issue => !issue.blocked) ? ` ／ 記録警告：${issues.filter(issue => !issue.blocked).length}件` : "")));
+        if (queue && (queue.blocked || queue.manualOnly || queue.nextAttemptAt > Date.now())) {
+          items.append(statusNode(document, `先頭の提案を待っています。${queue.errorCode ? errorMessageFor(queue.errorCode) : ""}${retryDescription(queue)}後続の提案も申請順を保って待機します。`));
+        }
+        if (unidentifiedCount) items.append(statusNode(document,
+          `所有者を確認できない保存データが${unidentifiedCount}件あります。内容の表示・送信・通常の控え出力は行いません。原本は保存領域に残しています。`, "error"));
+        for (const issue of issues) {
+          const item = element(document, "section", { className: "appamada-saved-item" });
+          item.append(facts([[issue.blocked ? "要確認の識別子" : "記録警告の識別子", issue.id], ["理由", errorMessageFor(issue.reason)]]),
+            statusNode(document, issue.blocked ? "原本を保全しています。この項目は自動送信しません。控えを保存して確認してください。"
+              : "受領記録から送信済みを確認しています。異常な状態記録も原本の控えに含めます。"));
+          items.append(item);
+        }
+        if (!entries.length && !issues.length && !unidentifiedCount) items.append(statusNode(document, "保存した提案はありません。"));
         for (const entry of entries) {
           const item = element(document, "section", { className: "appamada-saved-item" });
           const labels = { change: "難易度変更", new: "新規譜面", delete: "削除" };
@@ -598,12 +664,16 @@ export function installSubmissionUi({
             ["状態", states[entry.status]], ["コメント", entry.payload.comment],
           ]));
           if (entry.errorCode && entry.status !== "sent") item.append(statusNode(document, errorMessageFor(entry.errorCode), "error"));
+          item.append(statusNode(document, retryDescription(entry)));
           const remove = element(document, "button", { className: "appamada-close", type: "button",
             text: ["sent", "rejected"].includes(entry.status) ? "控えを消す" : "保存を取り消す" });
-          remove.disabled = !["sent", "rejected"].includes(entry.status) && entry.attempts > 0;
-          if (remove.disabled) remove.title = "送信を試みたため、受付状況が確定するまで取り消せません。";
+          const completed = ["sent", "rejected"].includes(entry.status);
+          remove.disabled = !completed && (entry.attempts > 0 || !outbox.canCancelUnsent);
+          if (remove.disabled) remove.title = entry.attempts > 0
+            ? errorMessageFor("OUTBOX_CANNOT_CANCEL") : errorMessageFor("OUTBOX_CANCEL_UNSAFE");
           remove.addEventListener("click", async () => {
-            try { await outbox.remove(entry.payload.request_id); await updateList(); }
+            if (completed && !window.confirm(`「${entry.metadata.title}」の完了控え1件をこのブラウザから消します。サーバー上の申請を撤回する操作ではありません。よろしいですか？`)) return;
+            try { await outbox.remove(entry.payload.request_id, { kind: completed ? "receipt" : "cancel" }); await updateList(); }
             catch (error) { status.replaceChildren(statusNode(document, errorMessageFor(error.code), "error")); }
           });
           item.append(remove);

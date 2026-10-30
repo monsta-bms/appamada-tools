@@ -95,6 +95,14 @@ class FakeRange {
     }
   }
 
+  getNote() { return this.sheet.notes.get(`${this.row}:${this.column}`) ?? ""; }
+
+  setNote(value) {
+    this.sheet.beforeNote?.(value);
+    this.sheet.notes.set(`${this.row}:${this.column}`, String(value));
+    return this;
+  }
+
   createTextFinder(query) {
     return new FakeTextFinder(this, query);
   }
@@ -105,6 +113,7 @@ class FakeSheet {
     this.name = name;
     this.rows = rows.map((row) => [...row]);
     this.frozenRows = 0;
+    this.notes = new Map();
   }
 
   getName() {
@@ -191,6 +200,7 @@ export async function createAppsScriptHarness({
   properties = {},
   lockAvailable = true,
   writeFails = false,
+  hooks = {},
 } = {}) {
   const kkj = new FakeSheet("kkj", kkjRows);
   const deleted = new FakeSheet("削除済", [DELETED_HEADERS, ...deletedRows]);
@@ -198,6 +208,7 @@ export async function createAppsScriptHarness({
     ? new FakeSheet("申請一覧", [applicationHeaders])
     : null;
   const spreadsheet = new FakeSpreadsheet([kkj, deleted, ...(application ? [application] : [])]);
+  if (application) application.beforeNote = hooks.beforeNote;
   const cache = new FakeCache();
   const scriptProperties = new Map(Object.entries({
     SPREADSHEET_ID: "test-spreadsheet",
@@ -207,7 +218,7 @@ export async function createAppsScriptHarness({
   }));
   const rawWrites = [];
   const logs = [];
-  const lockState = { available: lockAvailable, released: false };
+  const lockState = { available: lockAvailable, released: false, held: false };
 
   const context = vm.createContext({
     console: {
@@ -236,15 +247,19 @@ export async function createAppsScriptHarness({
       getScriptLock() {
         return {
           tryLock() {
-            return lockState.available;
+            if (!lockState.available || lockState.held) return false;
+            lockState.held = true;
+            return true;
           },
           releaseLock() {
             lockState.released = true;
+            lockState.held = false;
           },
         };
       },
     },
     SpreadsheetApp: {
+      flush() { hooks.flush?.(); },
       openById(id) {
         if (id !== "test-spreadsheet") throw new Error("Unknown spreadsheet");
         return spreadsheet;
@@ -254,12 +269,14 @@ export async function createAppsScriptHarness({
       Spreadsheets: {
         Values: {
           update(resource, spreadsheetId, range, options) {
+            hooks.beforeWrite?.();
             if (writeFails) throw new Error("write failed");
             const match = /^'申請一覧'!A(\d+):S\1$/.exec(range);
             if (!match || spreadsheetId !== "test-spreadsheet") throw new Error("bad range");
             const target = spreadsheet.getSheetByName("申請一覧");
             target.getRange(Number(match[1]), 1, 1, 19).setValues(resource.values);
             rawWrites.push({ resource, spreadsheetId, range, options });
+            hooks.afterWrite?.();
           },
         },
       },

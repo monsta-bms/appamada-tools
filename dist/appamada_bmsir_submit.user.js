@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         不放逸 BMSIR申請
 // @namespace    https://github.com/monsta-bms/appamada-tools
-// @version      0.4.8
+// @version      0.4.9
 // @description  BMSIRから不放逸への譜面申請を補助します
 // @match        https://bms-ir.org/new/song*
 // @match        https://www.bms-ir.org/new/song*
@@ -25,6 +25,34 @@
 // ==/UserScript==
 
 (() => {
+  // src/retry-policy.js
+  var DEFAULT_RATE_RETRY_MS = 6e5;
+  function validRetryDelay(value) {
+    if (typeof value !== "number" && !(typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value))) return null;
+    const milliseconds = Number(value);
+    return Number.isFinite(milliseconds) && milliseconds >= 0 && milliseconds <= Number.MAX_SAFE_INTEGER ? Math.ceil(milliseconds) : null;
+  }
+  function rateRetryDelay(value) {
+    return Math.max(3e4, validRetryDelay(value) ?? DEFAULT_RATE_RETRY_MS);
+  }
+  function retryAfterHeader(responseHeaders, now) {
+    if (typeof responseHeaders !== "string") return null;
+    const delays = [];
+    for (const line of responseHeaders.split(/\r?\n/)) {
+      const match = /^Retry-After\s*:\s*(.*?)\s*$/i.exec(line);
+      if (!match) continue;
+      const value = match[1];
+      if (/^\d+$/.test(value)) {
+        const delay = validRetryDelay(Number(value) * 1e3);
+        if (delay !== null) delays.push(delay);
+      } else if (/^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(value)) {
+        const date = Date.parse(value);
+        if (Number.isFinite(date)) delays.push(Math.max(0, date - now));
+      }
+    }
+    return delays.length ? Math.max(...delays) : null;
+  }
+
   // src/api-client.js
   var API_CLIENT_ERRORS = Object.freeze({
     API_NETWORK_ERROR: "API_NETWORK_ERROR",
@@ -33,6 +61,10 @@
     API_NOT_CONFIGURED: "API_NOT_CONFIGURED"
   });
   var MD5_PATTERN = /^[0-9a-f]{32}$/i;
+  var REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  function matchesRequestId(actual, expected) {
+    return actual === expected || typeof actual === "string" && typeof expected === "string" && REQUEST_ID_PATTERN.test(actual) && REQUEST_ID_PATTERN.test(expected) && actual.toLowerCase() === expected.toLowerCase();
+  }
   var LOCK_RETRY_RANGES = Object.freeze([
     [300, 500],
     [900, 1200],
@@ -61,24 +93,33 @@
       });
     }
   }
-  function parseApiResponse(response) {
+  function parseApiResponse(response, now) {
     const status = Number(response?.status ?? 0);
-    if (status < 200 || status >= 300) {
-      throw new ApiClientError(API_CLIENT_ERRORS.API_NETWORK_ERROR, `API returned HTTP ${status}`);
-    }
+    const successfulHttp = status >= 200 && status < 300;
     const text = String(response?.responseText ?? response?.response ?? "");
     let parsed;
     try {
       parsed = JSON.parse(text);
-    } catch (error) {
-      throw new ApiClientError(API_CLIENT_ERRORS.API_INVALID_RESPONSE, "API returned invalid JSON", {
-        cause: error
-      });
+    } catch {
     }
+    const headerDelay = retryAfterHeader(response?.responseHeaders, now);
+    const errorResponse = parsed?.ok === false && parsed.error && typeof parsed.error.code === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(parsed.error.code);
+    if (status === 429 || errorResponse) {
+      const code = status === 429 ? "RATE_LIMITED" : parsed.error.code;
+      const bodyDelay = errorResponse ? validRetryDelay(parsed.error.retry_after_ms) : null;
+      const delays = [bodyDelay, headerDelay].filter((value) => value !== null);
+      const retryDelay = delays.length ? Math.max(...delays) : code === "RATE_LIMITED" ? DEFAULT_RATE_RETRY_MS : null;
+      return { ...errorResponse ? parsed : {}, ok: false, error: {
+        ...errorResponse ? parsed.error : {},
+        code,
+        ...retryDelay === null ? {} : { retry_after_ms: retryDelay }
+      } };
+    }
+    if (!successfulHttp) throw new ApiClientError(API_CLIENT_ERRORS.API_NETWORK_ERROR, `API returned HTTP ${status}`);
     if (!parsed || typeof parsed !== "object" || typeof parsed.ok !== "boolean") {
       throw new ApiClientError(API_CLIENT_ERRORS.API_INVALID_RESPONSE, "API response shape is invalid");
     }
-    if (!parsed.ok && (!parsed.error || typeof parsed.error.code !== "string")) {
+    if (!parsed.ok && (!parsed.error || typeof parsed.error.code !== "string" || !/^[A-Z][A-Z0-9_]{0,79}$/.test(parsed.error.code))) {
       throw new ApiClientError(API_CLIENT_ERRORS.API_INVALID_RESPONSE, "API error shape is invalid");
     }
     return parsed;
@@ -145,12 +186,14 @@
     const configuredUrl = validateApiUrl(apiUrl);
     const lookupCache = /* @__PURE__ */ new Map();
     const lookupInFlight = /* @__PURE__ */ new Map();
+    let submitPause;
     async function requestJson(details) {
       return parseApiResponse(
         await gmRequestAsPromise(gmRequest, {
           timeout: timeoutMs,
           ...details
-        })
+        }),
+        now()
       );
     }
     async function lookup(md5) {
@@ -193,6 +236,11 @@
       return request;
     }
     async function submit(payload) {
+      if (submitPause?.until > now()) return {
+        ...submitPause.result,
+        request_id: payload?.request_id,
+        error: { ...submitPause.result.error, retry_after_ms: submitPause.until - now() }
+      };
       for (let attempt = 0; ; attempt += 1) {
         const result = await requestJson({
           method: "POST",
@@ -200,17 +248,26 @@
           headers: { "Content-Type": "text/plain;charset=UTF-8" },
           data: JSON.stringify(payload)
         });
-        if (result.ok && (typeof result.request_id !== "string" || typeof result.deduplicated !== "boolean")) {
+        if (result.ok && (typeof result.request_id !== "string" || !matchesRequestId(result.request_id, payload?.request_id) || typeof result.deduplicated !== "boolean")) {
           throw new ApiClientError(
             API_CLIENT_ERRORS.API_INVALID_RESPONSE,
             "submit response shape is invalid"
           );
         }
         const isLockTimeout = !result.ok && result.error?.code === "LOCK_TIMEOUT";
+        const serverDelay = result.ok ? null : validRetryDelay(result.error.retry_after_ms);
+        if (serverDelay !== null && serverDelay > 0) {
+          const until = Math.min(Number.MAX_SAFE_INTEGER, now() + serverDelay);
+          if (!submitPause || until > submitPause.until) submitPause = { until, result };
+        }
+        if (isLockTimeout && serverDelay >= 3e4) return result;
         if (!isLockTimeout || attempt >= LOCK_RETRY_RANGES.length) {
           return result;
         }
-        await sleep(jitteredDelay(LOCK_RETRY_RANGES[attempt], random));
+        await sleep(Math.max(
+          jitteredDelay(LOCK_RETRY_RANGES[attempt], random),
+          validRetryDelay(result.error.retry_after_ms) ?? 0
+        ));
       }
     }
     return Object.freeze({ lookup, submit });
@@ -514,6 +571,49 @@
     return index > 0 ? STEP_LEVELS[index - 1] : null;
   }
 
+  // src/outbox-export.js
+  function preserveRawRecord(record) {
+    const seen = /* @__PURE__ */ new WeakSet();
+    function jsonCompatible(value, depth = 0) {
+      if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+      if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
+      if (typeof value !== "object" || seen.has(value) || depth > 100) return false;
+      seen.add(value);
+      if (!Array.isArray(value) && Object.prototype.toString.call(value) !== "[object Object]") return false;
+      if (Array.isArray(value) && Object.keys(value).length !== value.length) return false;
+      return Object.keys(value).every((key) => jsonCompatible(value[key], depth + 1));
+    }
+    if (jsonCompatible(record.value)) return record;
+    const references = /* @__PURE__ */ new WeakMap(), nodes = [], pending = [];
+    function reference(value) {
+      if (value === null || ["string", "boolean"].includes(typeof value)) return { type: "literal", value };
+      if (typeof value === "number") return { type: "number", value: Object.is(value, -0) ? "-0" : String(value) };
+      if (typeof value === "undefined") return { type: "undefined" };
+      if (typeof value === "bigint") return { type: "bigint", value: String(value) };
+      if (typeof value !== "object") return { type: "unsupported", description: typeof value };
+      if (!references.has(value)) {
+        const id = nodes.length;
+        references.set(value, id);
+        nodes.push(null);
+        pending.push(value);
+      }
+      return { type: "reference", id: references.get(value) };
+    }
+    const root = reference(record.value);
+    for (let index = 0; index < pending.length; index++) {
+      const value = pending[index], id = references.get(value);
+      if (value instanceof Map) nodes[id] = { type: "map", entries: [...value].map(([k, v]) => [reference(k), reference(v)]) };
+      else if (value instanceof Set) nodes[id] = { type: "set", values: [...value].map(reference) };
+      else if (value instanceof Date) nodes[id] = { type: "date", value: String(value.getTime()) };
+      else nodes[id] = {
+        type: Array.isArray(value) ? "array" : "object",
+        ...Array.isArray(value) ? { length: value.length } : {},
+        entries: Object.keys(value).map((key) => [key, reference(value[key])])
+      };
+    }
+    return { key: record.key, encoding: "structured-graph-v1", value: { root, nodes } };
+  }
+
   // src/outbox.js
   var OFFLINE_NOTICE = "通信不具合中。現時点の難易度表データ取得できません";
   var PREFIX2 = "appamada.outbox.v1.";
@@ -535,6 +635,37 @@
     "SUBMISSIONS_DISABLED",
     ...LEGACY_GATEWAY_REJECTIONS
   ]);
+  var MANUAL_RESUME = /* @__PURE__ */ new Set([
+    "API_NOT_CONFIGURED",
+    "GATEWAY_NOT_CONFIGURED",
+    "GATEWAY_AUTH_REQUIRED",
+    "SHEET_NOT_FOUND",
+    "SHEET_SCHEMA_INVALID",
+    "CLIENT_VERSION_INVALID"
+  ]);
+  var PERMANENT = /* @__PURE__ */ new Set([
+    "BAD_REQUEST",
+    "APPLICATION_TYPE_INVALID",
+    "LOGIN_NAME_MISSING",
+    "PLAYER_ID_INVALID",
+    "MD5_INVALID",
+    "MD5_MISMATCH",
+    "IR_URL_INVALID",
+    "CHART_NOT_FOUND",
+    "CHART_DUPLICATED",
+    "CHART_ALREADY_EXISTS",
+    "CURRENT_LEVEL_UNSUPPORTED",
+    "TITLE_REQUIRED",
+    "TITLE_TOO_LONG",
+    "ARTIST_REQUIRED",
+    "ARTIST_TOO_LONG",
+    "LEVEL_REQUIRED",
+    "LEVEL_INVALID",
+    "SAME_AS_CURRENT",
+    "COMMENT_TOO_LONG",
+    "REQUEST_ID_INVALID",
+    "REQUEST_ID_CONFLICT"
+  ]);
   var COMMON_FIELDS = [
     "application_type",
     "request_id",
@@ -547,6 +678,7 @@
     "client_version"
   ];
   var clone = (value) => JSON.parse(JSON.stringify(value));
+  var localQueues = /* @__PURE__ */ new WeakMap();
   var OutboxError = class extends Error {
     constructor(code) {
       super(code);
@@ -571,16 +703,22 @@
     if (["get", "set", "remove", "keys"].every((name) => typeof legacy[name] === "function")) {
       return legacy;
     }
+    if (["getValue", "setValue", "deleteValue", "listValues"].some((name) => typeof modern?.[name] === "function") || ["get", "set", "remove", "keys"].some((name) => typeof legacy[name] === "function")) {
+      const unavailable = async () => {
+        throw new OutboxError("OUTBOX_STORAGE_UNAVAILABLE");
+      };
+      return { get: unavailable, set: unavailable, remove: unavailable, keys: unavailable };
+    }
     return null;
   }
-  function validatePayload(payload, playerId) {
+  function validatePayload(payload, playerId, { stored = false } = {}) {
     const fields = payload?.application_type === "new" ? [...COMMON_FIELDS, "title", "artist"] : COMMON_FIELDS;
     let url;
     try {
       url = new URL(payload.ir_url);
     } catch {
     }
-    if (!payload || !["change", "new", "delete"].includes(payload.application_type) || !UUID.test(payload.request_id) || !/^[0-9a-f]{32}$/.test(payload.md5) || !fields.every((field) => typeof payload[field] === "string") || Object.keys(payload).some((field) => !fields.includes(field)) || payload.bmsir_player_id !== playerId || !/^[0-9]+$/.test(playerId) || !payload.bmsir_user_name.trim() || Array.from(payload.comment).length > 500 || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(payload.client_version) || !(payload.application_type === "delete" ? payload.proposed_level === "削除" : isAllowedLevel(payload.proposed_level)) || !url || url.protocol !== "https:" || !["bms-ir.org", "www.bms-ir.org"].includes(url.hostname) || url.pathname !== "/new/song" || url.searchParams.get("songmd5")?.toLowerCase() !== payload.md5) throw new OutboxError("OUTBOX_INVALID_DATA");
+    if (!payload || !["change", "new", "delete"].includes(payload.application_type) || !UUID.test(payload.request_id) || !/^[0-9a-f]{32}$/.test(payload.md5) || !fields.every((field) => typeof payload[field] === "string") || Object.keys(payload).some((field) => !fields.includes(field)) || payload.bmsir_player_id !== playerId || !/^[0-9]+$/.test(playerId) || !stored && (!payload.bmsir_user_name.trim() || Array.from(payload.comment).length > 500 || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(payload.client_version) || !(payload.application_type === "delete" ? payload.proposed_level === "削除" : isAllowedLevel(payload.proposed_level))) || !url || url.protocol !== "https:" || !["bms-ir.org", "www.bms-ir.org"].includes(url.hostname) || url.pathname !== "/new/song" || url.searchParams.get("songmd5")?.toLowerCase() !== payload.md5) throw new OutboxError("OUTBOX_INVALID_DATA");
   }
   function createOutbox({
     storage,
@@ -588,6 +726,7 @@
     playerId,
     now = () => Date.now(),
     locks,
+    sharedLockScope = false,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     maxEntries = 200
   }) {
@@ -595,7 +734,9 @@
     playerId = String(playerId);
     let dispatching = false;
     const listeners = /* @__PURE__ */ new Set();
+    const canCancelUnsent = sharedLockScope === true && typeof locks?.request === "function";
     const key = (kind, id) => `${PREFIX2}${kind}.${id}`;
+    const deadline = (delay) => Math.min(Number.MAX_SAFE_INTEGER, now() + delay);
     const notify = () => {
       for (const listener of listeners) listener();
     };
@@ -614,68 +755,165 @@
         throw new OutboxError("OUTBOX_STORAGE_UNAVAILABLE");
       }
     }
-    async function getEntry(id) {
-      const entry = await read(key("entry", id));
-      if (!entry) return null;
-      if (entry.version !== 1 || !Number.isFinite(entry.createdAt) || !Number.isFinite(entry.notBefore) || typeof entry.payload?.bmsir_player_id !== "string" || typeof entry.metadata?.title !== "string" || typeof entry.metadata?.artist !== "string") {
-        throw new OutboxError("OUTBOX_INVALID_DATA");
-      }
-      if (entry.payload?.bmsir_player_id !== playerId) return null;
-      validatePayload(entry.payload, playerId);
-      if (entry.payload.request_id !== id) throw new OutboxError("OUTBOX_INVALID_DATA");
-      const [state, receipt, cancelled] = await Promise.all([
-        read(key("state", id)),
-        read(key("receipt", id)),
-        read(key("cancelled", id))
-      ]);
-      if (cancelled) return null;
-      if (state && (!Number.isInteger(state.attempts) || state.attempts < 0 || !Number.isFinite(state.nextAttemptAt) || !["pending", "sending", "rejected"].includes(state.status))) {
-        throw new OutboxError("OUTBOX_INVALID_DATA");
-      }
-      if (receipt && (receipt.request_id !== id || !Number.isFinite(receipt.sentAt) || typeof receipt.deduplicated !== "boolean")) {
-        throw new OutboxError("OUTBOX_INVALID_DATA");
-      }
-      const recoverGatewayRejection = !receipt && state?.status === "rejected" && LEGACY_GATEWAY_REJECTIONS.has(state.errorCode);
-      return clone({
-        ...entry,
-        ...state,
-        status: receipt ? "sent" : recoverGatewayRejection ? "pending" : state?.status ?? "pending",
-        attempts: state?.attempts ?? 0,
-        nextAttemptAt: recoverGatewayRejection ? 0 : state?.nextAttemptAt ?? entry.notBefore,
-        receipt
-      });
-    }
-    async function list() {
+    const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    const timestamp = (value) => Number.isFinite(value) && value >= 0;
+    async function storageKeys() {
       let keys;
       try {
         keys = await storage.keys();
       } catch {
         throw new OutboxError("OUTBOX_STORAGE_UNAVAILABLE");
       }
-      if (!Array.isArray(keys)) throw new OutboxError("OUTBOX_INVALID_DATA");
-      const ids = keys.filter((name) => name.startsWith(key("entry", ""))).map(
-        (name) => name.slice(key("entry", "").length)
-      );
-      const entries = [];
-      for (const id of ids) {
-        if (!UUID.test(id)) throw new OutboxError("OUTBOX_INVALID_DATA");
-        const entry = await getEntry(id);
-        if (entry) entries.push(entry);
+      if (!Array.isArray(keys) || keys.some((name) => typeof name !== "string")) {
+        throw new OutboxError("OUTBOX_STORAGE_UNAVAILABLE");
       }
-      return entries.sort((a, b) => a.createdAt - b.createdAt || a.payload.request_id.localeCompare(b.payload.request_id));
+      return new Set(keys);
+    }
+    async function inspectRecord(id, keys, { forDispatch = false } = {}) {
+      const names = ["entry", "state", "receipt", "cancelled"].map((kind) => key(kind, id));
+      const values = [];
+      values[0] = keys.has(names[0]) ? await read(names[0]) : void 0;
+      values[2] = keys.has(names[2]) ? await read(names[2]) : void 0;
+      const acknowledged = record(values[2]) && values[2].request_id === id && (values[2].version === void 0 || values[2].version === 1) && timestamp(values[2].sentAt) && typeof values[2].deduplicated === "boolean";
+      const skipState = forDispatch && acknowledged;
+      values[1] = !skipState && keys.has(names[1]) ? await read(names[1]) : void 0;
+      values[3] = keys.has(names[3]) ? await read(names[3]) : void 0;
+      const [entry, state, receipt, cancelled] = values;
+      const raw = names.flatMap((name, index) => keys.has(name) ? [{ key: name, value: values[index] }] : []);
+      const owner = entry?.payload?.bmsir_player_id;
+      if (typeof owner === "string" && /^\d+$/.test(owner) && owner !== playerId) return {};
+      if (owner !== playerId) {
+        if (entry === void 0 && cancelled === true && !keys.has(names[1]) && !keys.has(names[2])) return {};
+        return { unidentified: raw.length ? 1 : 0 };
+      }
+      const issue = (reason, blocked = true) => ({ issue: { id, reason, blocked }, raw });
+      if (!UUID.test(id)) return issue("OUTBOX_KEY_INVALID");
+      if (!record(entry) || entry.version !== 1) return issue("OUTBOX_VERSION_UNSUPPORTED");
+      if (Object.keys(entry).some((field) => !["version", "createdAt", "notBefore", "payload", "metadata"].includes(field)) || !timestamp(entry.createdAt) || !timestamp(entry.notBefore) || !record(entry.metadata) || typeof entry.metadata?.title !== "string" || typeof entry.metadata?.artist !== "string") {
+        return issue("OUTBOX_METADATA_INVALID");
+      }
+      try {
+        validatePayload(entry.payload, playerId, { stored: true });
+      } catch {
+        return issue("OUTBOX_PAYLOAD_INVALID");
+      }
+      if (entry.payload.request_id !== id) return issue("OUTBOX_KEY_INVALID");
+      if (keys.has(key("cancelled", id))) {
+        if (cancelled === true) return { raw };
+        return issue("OUTBOX_CANCELLATION_INVALID");
+      }
+      const hasState = !skipState && keys.has(key("state", id));
+      const validState = !hasState || record(state) && (state.version === void 0 || state.version === 1) && Object.keys(state).every((field) => ["version", "status", "attempts", "nextAttemptAt", "errorCode", "manualOnly", "retryNotBefore"].includes(field)) && Number.isSafeInteger(state.attempts) && state.attempts >= 0 && timestamp(state.nextAttemptAt) && ["pending", "sending", "rejected"].includes(state.status) && (state.errorCode === void 0 || typeof state.errorCode === "string") && (state.manualOnly === void 0 || typeof state.manualOnly === "boolean") && (state.retryNotBefore === void 0 || timestamp(state.retryNotBefore));
+      const hasReceipt = keys.has(key("receipt", id));
+      const validReceipt = hasReceipt && record(receipt) && (receipt.version === void 0 || receipt.version === 1) && Object.keys(receipt).every((field) => ["version", "request_id", "sentAt", "deduplicated"].includes(field)) && receipt.request_id === id && timestamp(receipt.sentAt) && typeof receipt.deduplicated === "boolean";
+      if (hasReceipt && !validReceipt) return issue("OUTBOX_RECEIPT_INVALID");
+      if (!validState && !validReceipt) return issue("OUTBOX_STATE_INVALID");
+      if (!validReceipt && state?.status === "rejected" && TRANSIENT.has(state.errorCode) && !LEGACY_GATEWAY_REJECTIONS.has(state.errorCode)) return issue("OUTBOX_STATE_UNCERTAIN");
+      const savedState = validState && hasState ? {
+        status: state.status,
+        attempts: state.attempts,
+        nextAttemptAt: state.nextAttemptAt,
+        errorCode: state.errorCode,
+        manualOnly: state.manualOnly,
+        retryNotBefore: state.retryNotBefore
+      } : void 0;
+      const recoverGatewayRejection = !validReceipt && savedState?.status === "rejected" && LEGACY_GATEWAY_REJECTIONS.has(savedState.errorCode);
+      const result = { raw, entry: clone({
+        ...entry,
+        ...savedState,
+        status: validReceipt ? "sent" : recoverGatewayRejection ? "pending" : savedState?.status ?? "pending",
+        attempts: !skipState && validState ? savedState?.attempts ?? 0 : null,
+        nextAttemptAt: recoverGatewayRejection ? 0 : savedState?.nextAttemptAt ?? entry.notBefore,
+        ...validReceipt ? { receipt } : {}
+      }) };
+      if (!validState) result.issue = { id, reason: "OUTBOX_STATE_INVALID", blocked: false };
+      if (!validReceipt) {
+        try {
+          validatePayload(entry.payload, playerId);
+        } catch {
+          return issue("OUTBOX_PAYLOAD_UNSUPPORTED");
+        }
+      }
+      return result;
+    }
+    async function inspect({ forDispatch = false } = {}) {
+      const keys = await storageKeys();
+      const ids = /* @__PURE__ */ new Set();
+      const unusual = [];
+      for (const name of keys) {
+        const match = /^appamada\.outbox\.v1\.(entry|state|receipt|cancelled)\.(.*)$/.exec(name);
+        if (match) ids.add(match[2]);
+        else if (name.startsWith("appamada.outbox.") && !name.startsWith(`${PREFIX2}pause.`)) unusual.push(name);
+      }
+      const entries = [], issues = [], raw = [];
+      let unidentifiedCount = 0;
+      for (const id of ids) {
+        const item = await inspectRecord(id, keys, { forDispatch });
+        if (item.entry) entries.push(item.entry);
+        if (item.issue) issues.push(item.issue);
+        if (item.raw) raw.push(...item.raw);
+        unidentifiedCount += item.unidentified ?? 0;
+      }
+      for (const name of unusual) {
+        const value = await read(name);
+        const owner = value?.payload?.bmsir_player_id;
+        if (owner === playerId) {
+          issues.push({ id: name, reason: "OUTBOX_KEY_INVALID", blocked: true });
+          raw.push({ key: name, value });
+        } else if (typeof owner !== "string" || !/^\d+$/.test(owner)) unidentifiedCount++;
+      }
+      entries.sort((a, b) => a.createdAt - b.createdAt || a.payload.request_id.localeCompare(b.payload.request_id));
+      const head = entries.find((entry) => ["pending", "sending"].includes(entry.status));
+      const pause = keys.has(key("pause", playerId)) ? await read(key("pause", playerId)) : void 0;
+      const validPause = pause === void 0 || record(pause) && timestamp(pause.until) && typeof pause.errorCode === "string" && (pause.retryNotBefore === void 0 || timestamp(pause.retryNotBefore));
+      if (!validPause) {
+        issues.push({ id: "pause", reason: "OUTBOX_PAUSE_INVALID", blocked: true });
+      }
+      if (pause !== void 0) raw.push({ key: key("pause", playerId), value: pause });
+      const paused = validPause && pause?.until > now();
+      const queue = head ? {
+        requestId: head.payload.request_id,
+        manualOnly: Boolean(head.manualOnly),
+        nextAttemptAt: Math.max(head.nextAttemptAt, paused ? pause.until : 0),
+        errorCode: !validPause ? "OUTBOX_PAUSE_INVALID" : paused ? pause.errorCode : head.errorCode,
+        blocked: !validPause
+      } : null;
+      return { entries, issues, unidentifiedCount, raw, reservedIds: ids, queue };
+    }
+    async function getEntry(id) {
+      const item = await inspectRecord(id, await storageKeys());
+      return item.entry ?? (item.issue ? { status: "review", errorCode: item.issue.reason } : null);
+    }
+    async function list() {
+      return (await inspect()).entries;
+    }
+    async function coordinate(task, nonBlocking = false) {
+      const previous = localQueues.get(storage) ?? Promise.resolve();
+      const current = previous.catch(() => {
+      }).then(() => {
+        if (typeof locks?.request !== "function") return task();
+        const name = `appamada-outbox-${playerId}`;
+        return nonBlocking ? locks.request(
+          name,
+          { ifAvailable: true },
+          (lock) => lock ? task() : { status: "busy" }
+        ) : locks.request(name, task);
+      });
+      const tail = current.then(() => {
+      }, () => {
+      });
+      localQueues.set(storage, tail);
+      try {
+        return await current;
+      } finally {
+        if (localQueues.get(storage) === tail) localQueues.delete(storage);
+      }
     }
     async function dispatch(task) {
       if (dispatching) return { status: "busy" };
       dispatching = true;
       try {
-        if (typeof locks?.request === "function") {
-          return await locks.request(
-            `appamada-outbox-dispatch-${playerId}`,
-            { ifAvailable: true },
-            (lock) => lock ? task() : { status: "busy" }
-          );
-        }
-        return await task();
+        return await coordinate(task, true);
       } finally {
         dispatching = false;
       }
@@ -683,17 +921,24 @@
     async function enqueue(payload, metadata, { defer = false } = {}) {
       validatePayload(payload, playerId);
       const save = async () => {
-        const entries = await list();
+        const snapshot = await inspect();
+        const { entries } = snapshot;
         const sameId = entries.find((entry2) => entry2.payload.request_id === payload.request_id);
         if (sameId) {
-          if (JSON.stringify(sameId.payload) !== JSON.stringify(payload)) throw new OutboxError("OUTBOX_CONFLICT");
+          const fields = COMMON_FIELDS.concat(payload.application_type === "new" ? ["title", "artist"] : []);
+          if (JSON.stringify(fields.map((field) => sameId.payload[field])) !== JSON.stringify(fields.map((field) => payload[field]))) {
+            throw new OutboxError("OUTBOX_CONFLICT");
+          }
           return sameId;
         }
         if (await read(key("cancelled", payload.request_id))) throw new OutboxError("OUTBOX_CONFLICT");
+        if (snapshot.reservedIds.has(payload.request_id)) throw new OutboxError("OUTBOX_REVIEW_REQUIRED");
         const intent = (value) => JSON.stringify(COMMON_FIELDS.concat(value.application_type === "new" ? ["title", "artist"] : []).filter((field) => !["request_id", "client_version"].includes(field)).map((field) => value[field]));
         const existing = entries.find((entry2) => ["pending", "sending"].includes(entry2.status) && intent(entry2.payload) === intent(payload));
         if (existing) return existing;
-        if (entries.length >= maxEntries) throw new OutboxError("OUTBOX_FULL");
+        if (entries.filter((entry2) => ["pending", "sending"].includes(entry2.status)).length >= maxEntries) {
+          throw new OutboxError("OUTBOX_FULL");
+        }
         const entry = {
           version: 1,
           createdAt: now(),
@@ -705,18 +950,27 @@
         notify();
         return getEntry(payload.request_id);
       };
-      return typeof locks?.request === "function" ? locks.request(`appamada-outbox-save-${playerId}`, save) : save();
+      return coordinate(save);
     }
     async function sendEntry(id, manual) {
       const entry = await getEntry(id);
       if (!entry) return { status: "missing" };
-      if (["sent", "rejected"].includes(entry.status)) return entry;
-      if (entry.nextAttemptAt > now() && (!manual || entry.status === "sending" || entry.errorCode === "RATE_LIMITED")) {
-        return { status: "waiting", errorCode: entry.errorCode };
+      if (["sent", "rejected", "review"].includes(entry.status)) return entry;
+      if (entry.manualOnly && !manual) return {
+        status: "waiting",
+        errorCode: entry.errorCode,
+        nextAttemptAt: entry.nextAttemptAt,
+        manualOnly: true
+      };
+      if (entry.retryNotBefore > now() || entry.nextAttemptAt > now() && (!manual || entry.status === "sending" || entry.errorCode === "RATE_LIMITED")) {
+        return { status: "waiting", errorCode: entry.errorCode, nextAttemptAt: Math.max(entry.nextAttemptAt, entry.retryNotBefore ?? 0) };
       }
       const pause = await read(key("pause", playerId));
-      if (pause?.until > now() && (!manual || pause.errorCode === "RATE_LIMITED")) {
-        return { status: "waiting", errorCode: pause.errorCode };
+      if (pause !== void 0 && (!record(pause) || !timestamp(pause.until) || typeof pause.errorCode !== "string" || pause.retryNotBefore !== void 0 && !timestamp(pause.retryNotBefore))) {
+        return { status: "review", errorCode: "OUTBOX_PAUSE_INVALID" };
+      }
+      if (pause?.retryNotBefore > now() || pause?.until > now() && (!manual || pause.errorCode === "RATE_LIMITED")) {
+        return { status: "waiting", errorCode: pause.errorCode, nextAttemptAt: Math.max(pause.until, pause.retryNotBefore ?? 0) };
       }
       const state = {
         status: "sending",
@@ -730,26 +984,47 @@
       let result;
       try {
         result = await apiClient.submit(clone(entry.payload));
-        if (result?.ok && (result.request_id !== id || typeof result.deduplicated !== "boolean")) {
+        if (typeof result?.ok !== "boolean" || result.ok && (!matchesRequestId(result.request_id, id) || typeof result.deduplicated !== "boolean")) {
           throw new OutboxError("API_INVALID_RESPONSE");
         }
         if (!result?.ok && typeof result?.error?.code !== "string") throw new OutboxError("API_INVALID_RESPONSE");
       } catch (error) {
-        result = { ok: false, error: { code: isCommunicationError(error?.code) ? error.code : "API_NETWORK_ERROR" } };
+        result = { ok: false, error: { code: isCommunicationError(error?.code) || MANUAL_RESUME.has(error?.code) ? error.code : "API_NETWORK_ERROR" } };
       }
       if (result.ok) {
-        await write(key("receipt", id), { request_id: id, sentAt: now(), deduplicated: result.deduplicated });
+        try {
+          await write(key("receipt", id), { request_id: id, sentAt: now(), deduplicated: result.deduplicated });
+        } catch (error) {
+          const acknowledged = await getEntry(id);
+          if (acknowledged?.status !== "sent") throw error;
+        }
       } else {
         const errorCode = result.error.code;
-        const retryable = TRANSIENT.has(errorCode);
-        const delay = errorCode === "RATE_LIMITED" ? Math.max(3e4, Math.min(6e5, Number(result.error.retry_after_ms) || 6e5)) : Math.min(3e5, 3e4 * 2 ** Math.min(state.attempts - 1, 4));
+        const retryable = !PERMANENT.has(errorCode);
+        const manualOnly = MANUAL_RESUME.has(errorCode) || !TRANSIENT.has(errorCode) && !PERMANENT.has(errorCode);
+        const delay = errorCode === "RATE_LIMITED" ? rateRetryDelay(result.error.retry_after_ms) : Math.max(
+          validRetryDelay(result.error.retry_after_ms) ?? 0,
+          Math.min(3e5, 3e4 * 2 ** Math.min(state.attempts - 1, 4))
+        );
         await write(key("state", id), {
           ...state,
           status: retryable ? "pending" : "rejected",
-          nextAttemptAt: retryable ? now() + delay : 0,
-          errorCode
+          nextAttemptAt: retryable ? deadline(delay) : 0,
+          errorCode,
+          manualOnly,
+          retryNotBefore: validRetryDelay(result.error.retry_after_ms) === null ? 0 : deadline(delay)
         });
-        if (retryable) await write(key("pause", playerId), { until: now() + delay, errorCode });
+        if (retryable) {
+          const oldPause = await read(key("pause", playerId));
+          await write(key("pause", playerId), {
+            until: Math.max(oldPause?.until ?? 0, deadline(delay)),
+            retryNotBefore: Math.max(
+              oldPause?.retryNotBefore ?? 0,
+              validRetryDelay(result.error.retry_after_ms) === null ? 0 : deadline(delay)
+            ),
+            errorCode: oldPause?.until > deadline(delay) ? oldPause.errorCode : errorCode
+          });
+        }
       }
       notify();
       return await getEntry(id) ?? { status: result.ok ? "sent" : "rejected", errorCode: result.error?.code };
@@ -759,27 +1034,33 @@
     }
     async function flush({ manual = false, limit = 5, shouldContinue = () => true } = {}) {
       return dispatch(async () => {
-        const entries = await list();
+        const { entries, queue } = await inspect({ forDispatch: true });
+        if (queue?.blocked) return [{ status: "review", errorCode: queue.errorCode }];
         const results = [];
         for (const entry of entries) {
           if (!shouldContinue()) break;
           if (!["pending", "sending"].includes(entry.status)) continue;
           const result = await sendEntry(entry.payload.request_id, manual);
           results.push(result);
-          if (["pending", "waiting"].includes(result.status) || results.length >= Math.min(5, limit)) break;
+          if (["pending", "waiting", "review"].includes(result.status) || results.length >= Math.min(5, limit)) break;
           await sleep(1e3);
         }
         return results;
       });
     }
-    async function remove(id) {
+    async function remove(id, { kind = "cancel" } = {}) {
       const result = await dispatch(async () => {
         const entry = await getEntry(id);
         if (!entry) return;
-        if (!["sent", "rejected"].includes(entry.status) && entry.attempts > 0) throw new OutboxError("OUTBOX_CANNOT_CANCEL");
+        if (entry.status === "review") throw new OutboxError("OUTBOX_REVIEW_REQUIRED");
+        const completed = ["sent", "rejected"].includes(entry.status);
+        if (kind === "cancel" && (completed || entry.attempts > 0) || kind === "receipt" && !completed || !["cancel", "receipt"].includes(kind)) throw new OutboxError("OUTBOX_CANNOT_CANCEL");
+        if (kind === "cancel" && !canCancelUnsent) {
+          throw new OutboxError("OUTBOX_CANCEL_UNSAFE");
+        }
         await write(key("cancelled", id), true);
         try {
-          for (const kind of ["entry", "state", "receipt"]) await storage.remove(key(kind, id));
+          for (const kind2 of ["entry", "state", "receipt"]) await storage.remove(key(kind2, id));
         } catch {
           throw new OutboxError("OUTBOX_STORAGE_UNAVAILABLE");
         }
@@ -793,8 +1074,30 @@
       send,
       flush,
       remove,
+      canCancelUnsent,
+      async inspect() {
+        const { entries, issues, unidentifiedCount, queue } = await inspect();
+        return { entries, issues, unidentifiedCount, queue };
+      },
       async exportData() {
-        return JSON.stringify({ version: 1, exportedAt: now(), entries: await list() }, null, 2);
+        const { entries, issues, raw, unidentifiedCount } = await inspect();
+        const ownRaw = raw.filter((record2) => ![record2.value?.payload?.bmsir_player_id, record2.value?.bmsir_player_id].some((owner) => typeof owner === "string" && /^\d+$/.test(owner) && owner !== playerId));
+        return JSON.stringify({
+          version: 1,
+          exportedAt: now(),
+          entries,
+          issues,
+          records: ownRaw.map(preserveRawRecord),
+          omittedRecords: {
+            count: raw.length - ownRaw.length,
+            notice: "別の所有者を示す情報を含む異常原本は、保存領域に残して通常の控え出力から除外しています。"
+          },
+          unidentified: {
+            count: unidentifiedCount,
+            included: false,
+            notice: "所有者を確認できない原本は保存領域に残しています。内容はこの控えに含めません。"
+          }
+        }, null, 2);
       },
       subscribe(listener) {
         listeners.add(listener);
@@ -891,9 +1194,21 @@
     INTERNAL_ERROR: "サーバー内部でエラーが発生しました。",
     OUTBOX_STORAGE_UNAVAILABLE: "保存した提案の読み書きができませんでした。保存権限や空き容量を確認してください。送信状況は「保存した提案」で確認してください。",
     OUTBOX_INVALID_DATA: "保存した提案を読み取れませんでした。データは削除していません。",
-    OUTBOX_FULL: "保存件数が上限に達しました。保存した提案から送信済み・受付不可の項目を消してください。",
+    OUTBOX_REVIEW_REQUIRED: "保存データの確認が必要です。原本を残し、自動送信を止めています。控えを保存して管理者へご相談ください。",
+    OUTBOX_KEY_INVALID: "保存データの識別子または保存形式を確認できません。",
+    OUTBOX_VERSION_UNSUPPORTED: "この版では読めない保存形式です。対応するUserscriptでの確認が必要です。",
+    OUTBOX_METADATA_INVALID: "保存日時または曲名・artistの保存情報を確認できません。",
+    OUTBOX_PAYLOAD_INVALID: "保存された申請内容の形式を確認できません。",
+    OUTBOX_PAYLOAD_UNSUPPORTED: "以前の申請内容が現在の受付条件に合いません。内容を自動変更せず保全しています。",
+    OUTBOX_STATE_INVALID: "過去の送信状態を確認できません。未送信とは扱いません。",
+    OUTBOX_STATE_UNCERTAIN: "通信失敗と受付不可の記録が矛盾しています。受付状況が不明なため、原本を保全して自動送信を止めています。",
+    OUTBOX_RECEIPT_INVALID: "送信結果の記録を確認できません。未送信とは扱いません。",
+    OUTBOX_CANCELLATION_INVALID: "保存取消の記録を確認できません。自動送信は行いません。",
+    OUTBOX_PAUSE_INVALID: "投稿間隔の待機記録を確認できません。安全のため再送を止め、原本を残しています。控えを保存して管理者へご相談ください。",
+    OUTBOX_FULL: "送信待ち・送信結果未確定の提案が上限200件に達しました。完了控えや要確認データは別に保持しています。",
     OUTBOX_CONFLICT: "同じ申請の保存内容が一致しません。保存した提案を確認してください。",
     OUTBOX_CANNOT_CANCEL: "送信を試みた提案は、受け付けられた可能性があるため取り消せません。",
+    OUTBOX_CANCEL_UNSAFE: "複数ページ間で送信と取消の順序を保証できないため、この環境では未送信の保存取消を利用できません。",
     OUTBOX_BUSY: "保存した提案を送信中です。少し待ってください。"
   });
   var STYLE = `
@@ -949,7 +1264,42 @@
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
   function errorMessageFor(code) {
-    return ERROR_MESSAGES[code] ?? "申請を処理できませんでした。時間を置いて再度お試しください。";
+    return Object.hasOwn(ERROR_MESSAGES, code) ? ERROR_MESSAGES[code] : "申請を処理できませんでした。時間を置いて再度お試しください。";
+  }
+  function retryDescription(entry, now = Date.now()) {
+    if (entry.status === "sent") return "申請を受け付けました。難易度表への反映・承認完了を示すものではありません。";
+    if (entry.status === "rejected") return "受付不可の控えです。自動で再送しません。控えの削除は申請の撤回ではありません。";
+    if (entry.status === "review" || entry.blocked) return "確認が必要なため自動送信しません。原本の控えを保存して確認してください。";
+    if (entry.manualOnly) return "自動再送は保留しています。設定や対応版を確認後、「送信待ちを再送」で再開できます。元の申請内容・識別子は変更しません。";
+    const time = new Date(entry.nextAttemptAt);
+    const next = entry.nextAttemptAt > now && Number.isFinite(time.getTime()) ? `次の自動再送は${time.toLocaleString("ja-JP")}以降です。` : "このページを開いている間、順番に自動再送します。";
+    if (entry.status === "sending") return `受付結果がまだ確定していません。取り消さず、同じ識別子で確認し直します。${next}`;
+    return `${entry.errorCode === "RATE_LIMITED" ? "投稿間隔の制限が終わるのを待っています。" : ""}${next}`;
+  }
+  function showSubmissionUnavailable(document2, pageUrl, code) {
+    let url;
+    try {
+      url = new URL(pageUrl);
+    } catch {
+      return;
+    }
+    if (url.protocol !== "https:" || !["bms-ir.org", "www.bms-ir.org"].includes(url.hostname) || url.pathname !== "/new/song") return;
+    const messages = {
+      NOT_LOGGED_IN: "不放逸の申請は、BMS-IRへログインすると利用できます。",
+      USER_DOM_INVALID: "ログイン情報の構造を確認できないため、不放逸の申請を開始できません。",
+      SONG_DOM_INVALID: "譜面ページの構造を確認できないため、不放逸の申請を開始できません。",
+      MD5_MISMATCH: "譜面の識別情報が一致しないため、不放逸の申請を開始できません。",
+      MD5_INVALID: "URLの譜面識別情報を確認できないため、不放逸の申請を開始できません。"
+    };
+    let notice = document2.querySelector("[data-appamada-unavailable]");
+    if (!notice) {
+      notice = element(document2, "p");
+      notice.dataset.appamadaUnavailable = "true";
+      notice.setAttribute("role", "status");
+      notice.style.cssText = "padding:8px;border:1px solid #888;background:#fff;color:#222;font:14px system-ui;";
+      document2.body.append(notice);
+    }
+    notice.textContent = Object.hasOwn(messages, code) ? messages[code] : `不放逸の申請を開始できません。${errorMessageFor(code)}`;
   }
   function installSubmissionUi({
     document: document2,
@@ -1088,7 +1438,7 @@
           if (result2.status === "sent") {
             statusContainer.replaceChildren(statusNode(document2, "申請を送信しました。", "success"));
             button.textContent = "送信済み";
-          } else if (result2.status === "rejected") {
+          } else if (["rejected", "review"].includes(result2.status)) {
             statusContainer.replaceChildren(statusNode(document2, errorMessageFor(result2.errorCode), "error"));
             button.dataset.submitting = "false";
             button.textContent = offline ? "ブラウザに保存" : "申請を送信";
@@ -1099,7 +1449,7 @@
             const reason = result2.errorCode && !isCommunicationError(result2.errorCode) ? `${errorMessageFor(result2.errorCode)} ` : "";
             statusContainer.replaceChildren(statusNode(
               document2,
-              `${isCommunicationError(result2.errorCode) ? `${OFFLINE_NOTICE}。 ` : ""}${reason}提案をブラウザに保存しました。まだ送信完了していません。通信が回復したら再送します。右クリックの「保存した提案」から確認できます。`
+              `${isCommunicationError(result2.errorCode) ? `${OFFLINE_NOTICE}。 ` : ""}${reason}提案をブラウザに保存しました。まだ送信完了していません。${retryDescription(result2)}右クリックの「保存した提案」から確認できます。`
             ));
             button.textContent = "保存済み（送信待ち）";
           }
@@ -1109,6 +1459,9 @@
         }
         const result = await apiClient.submit(payload);
         if (result.ok) {
+          if (!matchesRequestId(result.request_id, payload.request_id) || typeof result.deduplicated !== "boolean") {
+            throw new ApiClientError("API_INVALID_RESPONSE", "Mismatched acknowledgement");
+          }
           const message = result.deduplicated ? "この申請はすでに送信済みです。" : "申請を送信しました。";
           statusContainer.replaceChildren(statusNode(document2, message, "success"));
           button.textContent = "送信済み";
@@ -1387,12 +1740,31 @@
       const items = element(document2, "div");
       actions.append(retry, refresh, backup);
       shell.content.append(actions, status, items);
+      let refreshVersion = 0;
       async function updateList() {
+        const version = ++refreshVersion;
         try {
-          const entries = await outbox.list();
-          if (activeModal !== shell) return;
+          const { entries, issues, unidentifiedCount, queue } = await outbox.inspect();
+          if (activeModal !== shell || version !== refreshVersion) return;
           items.replaceChildren();
-          if (!entries.length) items.append(statusNode(document2, "保存した提案はありません。"));
+          items.append(statusNode(document2, `正常な提案：${entries.length}件 ／ 要確認：${issues.filter((issue) => issue.blocked).length}件` + (issues.some((issue) => !issue.blocked) ? ` ／ 記録警告：${issues.filter((issue) => !issue.blocked).length}件` : "")));
+          if (queue && (queue.blocked || queue.manualOnly || queue.nextAttemptAt > Date.now())) {
+            items.append(statusNode(document2, `先頭の提案を待っています。${queue.errorCode ? errorMessageFor(queue.errorCode) : ""}${retryDescription(queue)}後続の提案も申請順を保って待機します。`));
+          }
+          if (unidentifiedCount) items.append(statusNode(
+            document2,
+            `所有者を確認できない保存データが${unidentifiedCount}件あります。内容の表示・送信・通常の控え出力は行いません。原本は保存領域に残しています。`,
+            "error"
+          ));
+          for (const issue of issues) {
+            const item = element(document2, "section", { className: "appamada-saved-item" });
+            item.append(
+              facts([[issue.blocked ? "要確認の識別子" : "記録警告の識別子", issue.id], ["理由", errorMessageFor(issue.reason)]]),
+              statusNode(document2, issue.blocked ? "原本を保全しています。この項目は自動送信しません。控えを保存して確認してください。" : "受領記録から送信済みを確認しています。異常な状態記録も原本の控えに含めます。")
+            );
+            items.append(item);
+          }
+          if (!entries.length && !issues.length && !unidentifiedCount) items.append(statusNode(document2, "保存した提案はありません。"));
           for (const entry of entries) {
             const item = element(document2, "section", { className: "appamada-saved-item" });
             const labels = { change: "難易度変更", new: "新規譜面", delete: "削除" };
@@ -1405,16 +1777,19 @@
               ["コメント", entry.payload.comment]
             ]));
             if (entry.errorCode && entry.status !== "sent") item.append(statusNode(document2, errorMessageFor(entry.errorCode), "error"));
+            item.append(statusNode(document2, retryDescription(entry)));
             const remove = element(document2, "button", {
               className: "appamada-close",
               type: "button",
               text: ["sent", "rejected"].includes(entry.status) ? "控えを消す" : "保存を取り消す"
             });
-            remove.disabled = !["sent", "rejected"].includes(entry.status) && entry.attempts > 0;
-            if (remove.disabled) remove.title = "送信を試みたため、受付状況が確定するまで取り消せません。";
+            const completed = ["sent", "rejected"].includes(entry.status);
+            remove.disabled = !completed && (entry.attempts > 0 || !outbox.canCancelUnsent);
+            if (remove.disabled) remove.title = entry.attempts > 0 ? errorMessageFor("OUTBOX_CANNOT_CANCEL") : errorMessageFor("OUTBOX_CANCEL_UNSAFE");
             remove.addEventListener("click", async () => {
+              if (completed && !window2.confirm(`「${entry.metadata.title}」の完了控え1件をこのブラウザから消します。サーバー上の申請を撤回する操作ではありません。よろしいですか？`)) return;
               try {
-                await outbox.remove(entry.payload.request_id);
+                await outbox.remove(entry.payload.request_id, { kind: completed ? "receipt" : "cancel" });
                 await updateList();
               } catch (error) {
                 status.replaceChildren(statusNode(document2, errorMessageFor(error.code), "error"));
@@ -1525,11 +1900,12 @@
   }
 
   // src/submission-main.js
-  var CLIENT_VERSION = "0.4.8";
+  var CLIENT_VERSION = "0.4.9";
   var DEBUG = false;
   var logger = createLogger({ debug: DEBUG });
   var parseResult = parseBmsirPage(document, location.href);
   if (!parseResult.ok) {
+    showSubmissionUnavailable(document, location.href, parseResult.error);
     logger.warn("PARSE_FAILED", {
       code: parseResult.error,
       ...collectDomDiagnostics(document, location.href)
@@ -1576,6 +1952,7 @@
       });
     } catch (error) {
       logger.warn("SUBMISSION_INIT_FAILED", error?.code ?? "INTERNAL_ERROR");
+      showSubmissionUnavailable(document, location.href, error?.code ?? "INTERNAL_ERROR");
     }
   }
 })();

@@ -5,7 +5,7 @@ import { JSDOM } from "jsdom";
 
 import { parseBmsirPage, resolveSongElements } from "../src/bmsir-parser.js";
 import { ALLOWED_LEVELS } from "../src/levels.js";
-import { errorMessageFor, installSubmissionUi } from "../src/ui.js";
+import { errorMessageFor, installSubmissionUi, retryDescription, showSubmissionUnavailable } from "../src/ui.js";
 import { ApiClientError } from "../src/api-client.js";
 import { createOutbox, OFFLINE_NOTICE } from "../src/outbox.js";
 import { memoryStorage } from "./helpers/outbox-storage.js";
@@ -470,4 +470,110 @@ test("closed lookup modal is not reopened by a late response", async () => {
   await flush();
   assert.equal(state.document.querySelector(".appamada-overlay"), null);
   state.dom.window.close();
+});
+
+test("saved proposals remain usable with own corruption; foreign/unknown contents never appear in list or backup", async () => {
+  const state = setup({ withOutbox: true });
+  const player = parseBmsirPage(state.document, PAGE_URL).user;
+  const p = { application_type: "change", request_id: UUID, md5: MD5, proposed_level: "10",
+    comment: "own comment", bmsir_user_name: player.name, bmsir_player_id: player.playerId,
+    ir_url: PAGE_URL, client_version: "0.4.7" };
+  await state.outbox.enqueue(p, { title: "Own title", artist: "Own artist" });
+  const values = state.storage.values;
+  const ownKey = `appamada.outbox.v1.entry.${UUID}`;
+  const corrupt = structuredClone(values.get(ownKey));
+  corrupt.payload.request_id = UUID.replace(/0$/, "1"); corrupt.metadata = null;
+  values.set(`appamada.outbox.v1.entry.${corrupt.payload.request_id}`, corrupt);
+  values.set("appamada.outbox.v1.entry.unknown-id", { contents: "UNKNOWN_PRIVATE_TEXT" });
+  values.set("appamada.outbox.v1.entry.foreign-id", { payload: { bmsir_player_id: "789", comment: "FOREIGN_PRIVATE_TEXT" } });
+  await openWorkflow(state, "saved"); await flush();
+  const modal = state.document.querySelector(".appamada-modal");
+  assert.match(modal.textContent, /正常な提案：1件.*要確認：1件/);
+  assert.match(modal.textContent, /所有者を確認できない保存データが1件/);
+  assert.match(modal.textContent, /Own title/);
+  assert.doesNotMatch(modal.textContent, /UNKNOWN_PRIVATE_TEXT|FOREIGN_PRIVATE_TEXT/);
+  const cancel = [...modal.querySelectorAll("button")].find(b => b.textContent === "保存を取り消す");
+  assert.equal(cancel.disabled, true);
+  assert.match(cancel.title, /複数ページ間/);
+  [...modal.querySelectorAll("button")].find(b => b.textContent === "控えを保存").click();
+  await flush();
+  const link = modal.querySelector("a[download]");
+  const exported = JSON.parse(decodeURIComponent(link.href.split(",").slice(1).join(",")));
+  assert.equal(exported.issues.length, 1);
+  assert.deepEqual(exported.records.find(r => r.key.endsWith(corrupt.payload.request_id)).value, corrupt);
+  assert.doesNotMatch(JSON.stringify(exported), /UNKNOWN_PRIVATE_TEXT|FOREIGN_PRIVATE_TEXT/);
+  state.ui.destroy(); state.dom.window.close();
+});
+
+test("a failed existing storage never falls back to direct online POST or a saved-success display", async () => {
+  for (const method of ["keys", "get"]) {
+    const storage = memoryStorage();
+    storage[method] = async () => { throw new Error("denied"); };
+    let posts = 0;
+    const state = setup({ storage, withOutbox: true, submit: async () => { posts++; } });
+    await openWorkflow(state, "new");
+    state.document.querySelector('[data-level="10"]').click();
+    state.document.querySelector(".appamada-submit").click();
+    await flush(); await flush();
+    assert.equal(posts, 0);
+    assert.match(state.document.querySelector(".appamada-status-error").textContent, /読み書きができません/);
+    assert.notEqual(state.document.querySelector(".appamada-submit").dataset.completed, "true");
+    state.ui.destroy(); state.dom.window.close();
+  }
+});
+
+test("one completed receipt requires confirmation and its removal never claims server withdrawal", async () => {
+  const state = setup({ withOutbox: true });
+  await openWorkflow(state, "new");
+  state.document.querySelector('[data-level="10"]').click();
+  state.document.querySelector(".appamada-submit").click();
+  await flush(); await flush();
+  await openWorkflow(state, "saved"); await flush();
+  let message;
+  state.dom.window.confirm = text => { message = text; return false; };
+  [...state.document.querySelectorAll("button")].find(b => b.textContent === "控えを消す").click();
+  await flush();
+  assert.match(message, /完了控え1件.*撤回する操作ではありません/);
+  assert.equal((await state.outbox.list()).length, 1);
+  state.dom.window.confirm = () => true;
+  [...state.document.querySelectorAll("button")].find(b => b.textContent === "控えを消す").click();
+  await flush(); await flush();
+  assert.equal((await state.outbox.list()).length, 0);
+  state.ui.destroy(); state.dom.window.close();
+});
+
+test("parse notices distinguish login, ambiguous structure and mismatched MD5 without relaxing parser or installing forms", async () => {
+  for (const [fixture, mutate, expected] of [
+    ["logged-out-song-current.html", () => {}, /ログイン/],
+    ["logged-in-song-current.html", d => d.querySelector("#main-content > h1").after(d.querySelector("#main-content > h1").cloneNode(true)), /ページの構造/],
+    ["logged-in-song-current.html", d => { const p = [...d.querySelectorAll("#main-content > p.muted")].find(p => p.textContent.includes("ranking_key:")); p.textContent = p.textContent.replace(MD5, "a".repeat(32)); }, /識別情報が一致しない/],
+  ]) {
+    const html = await readFile(new URL(`./fixtures/${fixture}`, import.meta.url), "utf8");
+    const dom = new JSDOM(html, { url: PAGE_URL }); mutate(dom.window.document);
+    const parsed = parseBmsirPage(dom.window.document, PAGE_URL);
+    assert.equal(parsed.ok, false);
+    showSubmissionUnavailable(dom.window.document, PAGE_URL, parsed.error);
+    assert.match(dom.window.document.querySelector("[data-appamada-unavailable]").textContent, expected);
+    assert.equal(dom.window.document.querySelector(".appamada-menu,.appamada-modal"), null);
+    dom.window.close();
+  }
+});
+
+test("hold/automatic retry explanations distinguish server stop, update/configuration and unknown results", () => {
+  assert.match(retryDescription({ status: "pending", manualOnly: true, errorCode: "GATEWAY_AUTH_REQUIRED" }), /自動再送は保留.*再開/);
+  assert.match(retryDescription({ status: "pending", errorCode: "RATE_LIMITED", nextAttemptAt: Date.now() + 60_000 }), /投稿間隔.*次の自動再送/);
+  assert.match(retryDescription({ status: "sending", nextAttemptAt: Date.now() + 90_000 }), /受付結果がまだ確定.*同じ識別子/);
+  assert.match(retryDescription({ status: "sent" }), /反映・承認完了.*ではありません/);
+});
+
+test("an all-quarantined queue never claims the saved data is empty", async () => {
+  const state = setup({ withOutbox: true });
+  const player = parseBmsirPage(state.document, PAGE_URL).user;
+  state.storage.values.set(`appamada.outbox.v1.entry.${UUID}`, { version: 99,
+    payload: { bmsir_player_id: player.playerId }, metadata: null });
+  await openWorkflow(state, "saved"); await flush();
+  const text = state.document.querySelector(".appamada-modal").textContent;
+  assert.match(text, /正常な提案：0件.*要確認：1件/);
+  assert.doesNotMatch(text, /保存した提案はありません/);
+  state.ui.destroy(); state.dom.window.close();
 });

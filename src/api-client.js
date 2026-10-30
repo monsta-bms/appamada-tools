@@ -1,3 +1,5 @@
+import { DEFAULT_RATE_RETRY_MS, retryAfterHeader, validRetryDelay } from "./retry-policy.js";
+
 export const API_CLIENT_ERRORS = Object.freeze({
   API_NETWORK_ERROR: "API_NETWORK_ERROR",
   API_TIMEOUT: "API_TIMEOUT",
@@ -6,6 +8,11 @@ export const API_CLIENT_ERRORS = Object.freeze({
 });
 
 const MD5_PATTERN = /^[0-9a-f]{32}$/i;
+const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function matchesRequestId(actual, expected) {
+  return actual === expected || (typeof actual === "string" && typeof expected === "string" &&
+    REQUEST_ID_PATTERN.test(actual) && REQUEST_ID_PATTERN.test(expected) && actual.toLowerCase() === expected.toLowerCase());
+}
 const LOCK_RETRY_RANGES = Object.freeze([
   [300, 500],
   [900, 1200],
@@ -44,26 +51,32 @@ function validateApiUrl(apiUrl) {
   }
 }
 
-function parseApiResponse(response) {
+function parseApiResponse(response, now) {
   const status = Number(response?.status ?? 0);
-  if (status < 200 || status >= 300) {
-    throw new ApiClientError(API_CLIENT_ERRORS.API_NETWORK_ERROR, `API returned HTTP ${status}`);
-  }
-
+  const successfulHttp = status >= 200 && status < 300;
   const text = String(response?.responseText ?? response?.response ?? "");
   let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    throw new ApiClientError(API_CLIENT_ERRORS.API_INVALID_RESPONSE, "API returned invalid JSON", {
-      cause: error,
-    });
+  try { parsed = JSON.parse(text); } catch { /* HTTP 429 can also contain HTML. */ }
+  const headerDelay = retryAfterHeader(response?.responseHeaders, now);
+  const errorResponse = parsed?.ok === false && parsed.error &&
+    typeof parsed.error.code === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(parsed.error.code);
+  if (status === 429 || errorResponse) {
+    const code = status === 429 ? "RATE_LIMITED" : parsed.error.code;
+    const bodyDelay = errorResponse ? validRetryDelay(parsed.error.retry_after_ms) : null;
+    const delays = [bodyDelay, headerDelay].filter(value => value !== null);
+    const retryDelay = delays.length ? Math.max(...delays) : code === "RATE_LIMITED" ? DEFAULT_RATE_RETRY_MS : null;
+    return { ...(errorResponse ? parsed : {}), ok: false, error: {
+      ...(errorResponse ? parsed.error : {}), code,
+      ...(retryDelay === null ? {} : { retry_after_ms: retryDelay }),
+    } };
   }
-
+  // A success body on an unsuccessful transport is not an acknowledgement.
+  if (!successfulHttp) throw new ApiClientError(API_CLIENT_ERRORS.API_NETWORK_ERROR, `API returned HTTP ${status}`);
   if (!parsed || typeof parsed !== "object" || typeof parsed.ok !== "boolean") {
     throw new ApiClientError(API_CLIENT_ERRORS.API_INVALID_RESPONSE, "API response shape is invalid");
   }
-  if (!parsed.ok && (!parsed.error || typeof parsed.error.code !== "string")) {
+  if (!parsed.ok && (!parsed.error || typeof parsed.error.code !== "string" ||
+    !/^[A-Z][A-Z0-9_]{0,79}$/.test(parsed.error.code))) {
     throw new ApiClientError(API_CLIENT_ERRORS.API_INVALID_RESPONSE, "API error shape is invalid");
   }
   return parsed;
@@ -128,13 +141,14 @@ export function createApiClient({
   const configuredUrl = validateApiUrl(apiUrl);
   const lookupCache = new Map();
   const lookupInFlight = new Map();
+  let submitPause;
 
   async function requestJson(details) {
     return parseApiResponse(
       await gmRequestAsPromise(gmRequest, {
         timeout: timeoutMs,
         ...details,
-      }),
+      }), now(),
     );
   }
 
@@ -192,6 +206,8 @@ export function createApiClient({
   }
 
   async function submit(payload) {
+    if (submitPause?.until > now()) return { ...submitPause.result, request_id: payload?.request_id,
+      error: { ...submitPause.result.error, retry_after_ms: submitPause.until - now() } };
     for (let attempt = 0; ; attempt += 1) {
       const result = await requestJson({
         method: "POST",
@@ -202,7 +218,7 @@ export function createApiClient({
 
       if (
         result.ok &&
-        (typeof result.request_id !== "string" || typeof result.deduplicated !== "boolean")
+        (typeof result.request_id !== "string" || !matchesRequestId(result.request_id, payload?.request_id) || typeof result.deduplicated !== "boolean")
       ) {
         throw new ApiClientError(
           API_CLIENT_ERRORS.API_INVALID_RESPONSE,
@@ -211,10 +227,19 @@ export function createApiClient({
       }
 
       const isLockTimeout = !result.ok && result.error?.code === "LOCK_TIMEOUT";
+      const serverDelay = result.ok ? null : validRetryDelay(result.error.retry_after_ms);
+      if (serverDelay !== null && serverDelay > 0) {
+        const until = Math.min(Number.MAX_SAFE_INTEGER, now() + serverDelay);
+        if (!submitPause || until > submitPause.until) submitPause = { until, result };
+      }
+      // Long instructions belong in the durable outbox instead of an extended
+      // in-memory sleep with an expiring sending lease.
+      if (isLockTimeout && serverDelay >= 30_000) return result;
       if (!isLockTimeout || attempt >= LOCK_RETRY_RANGES.length) {
         return result;
       }
-      await sleep(jitteredDelay(LOCK_RETRY_RANGES[attempt], random));
+      await sleep(Math.max(jitteredDelay(LOCK_RETRY_RANGES[attempt], random),
+        validRetryDelay(result.error.retry_after_ms) ?? 0));
     }
   }
 

@@ -29,7 +29,7 @@ function configuredApiUrl(source) {
 function assertReleaseMetadata(source, apiUrl) {
   assert.equal(source.startsWith("// ==UserScript=="), true);
   assert.match(source, /^\/\/ @name\s+不放逸 BMSIR申請$/m);
-  assert.equal(source.match(/^\/\/ @version\s+(.+)$/m)?.[1], "0.4.8");
+  assert.equal(source.match(/^\/\/ @version\s+(.+)$/m)?.[1], "0.4.9");
   assert.doesNotMatch(source, /採用されると管理者の○反映時にkkj/);
   assert.match(source, /^\/\/ @run-at\s+document-idle$/m);
   assert.match(source, /^\/\/ @noframes$/m);
@@ -142,7 +142,7 @@ test("local candidate initializes old and current logged-in DOM with one lookup 
   }
 });
 
-test("local candidate leaves a logged-out page untouched", async () => {
+test("local candidate explains login requirement without installing submission controls or making requests", async () => {
   const [source, html] = await Promise.all([
     readFile(builtDistUrl, "utf8"),
     readFile(new URL("logged-out-song.html", fixtureUrl), "utf8"),
@@ -151,10 +151,10 @@ test("local candidate leaves a logged-out page untouched", async () => {
   let externalCalls = 0;
   dom.window.GM_xmlhttpRequest = () => { externalCalls += 1; };
   dom.window.GM_addStyle = () => { externalCalls += 1; };
-  const before = dom.serialize();
 
   assert.doesNotThrow(() => dom.window.eval(source));
-  assert.equal(dom.serialize(), before);
+  assert.match(dom.window.document.querySelector("[data-appamada-unavailable]").textContent, /ログイン/);
+  assert.equal(dom.window.document.querySelector(".appamada-menu,.appamada-modal"), null);
   assert.equal(externalCalls, 0);
   dom.window.close();
 });
@@ -244,7 +244,7 @@ test("local candidate saves offline in GM storage and resends after page reopen 
     await until(() => first.window.document.querySelector(".appamada-submit").textContent.includes("保存済み"));
     assert.equal(posted.length, 0);
     const saved = [...values.entries()].find(([key]) => key.includes("entry."))[1];
-    assert.equal(saved.payload.client_version, "0.4.8");
+    assert.equal(saved.payload.client_version, "0.4.9");
     first.window.dispatchEvent(new first.window.Event("pagehide"));
     first.window.close();
     time += 30_001;

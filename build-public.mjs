@@ -7,7 +7,7 @@ if (!/^[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev$/.test(endpoint.hostname) || endpoin
 
 await buildSubmission({
   apiUrl: process.env.APPAMADA_API_URL,
-  clientVersion: "0.4.8",
+  clientVersion: "0.4.9",
   metadataPath: "./src/userscript-header.txt",
   outputPath: "./dist/appamada_bmsir_submit.user.js",
 });

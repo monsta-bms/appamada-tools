@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 import { createGmStorage, createOutbox, startOutboxSync } from "../src/outbox.js";
 import { createAppsScriptHarness } from "./helpers/apps-script-harness.js";
 import { memoryStorage } from "./helpers/outbox-storage.js";
+import { lockManager } from "./helpers/locks.js";
 
 const MD5 = "b89279d026c9d40d0f5eedde2e25b920";
 const id = (n = 1) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -23,7 +24,7 @@ function setup(options = {}) {
     calls.push(body);
     return { ok: true, request_id: body.request_id, deduplicated: false };
   } };
-  const make = (extra = {}) => createOutbox({ storage, apiClient, playerId: "123456",
+  const make = (extra = {}) => (options.factory ?? createOutbox)({ storage, apiClient, playerId: "123456",
     now: () => time, sleep: async () => {}, ...options, ...extra });
   return { storage, calls, make, outbox: make(), advance(ms) { time += ms; } };
 }
@@ -193,12 +194,14 @@ test("different accounts are isolated and invalid data is preserved, not silentl
   const name = [...state.storage.values.keys()].find((name) => name.includes("entry."));
   const corrupted = { ...state.storage.values.get(name), notBefore: "invalid" };
   state.storage.values.set(name, corrupted);
-  await assert.rejects(state.outbox.list(), { code: "OUTBOX_INVALID_DATA" });
+  assert.equal((await state.outbox.list()).length, 0);
+  assert.equal((await state.outbox.inspect()).issues.length, 1);
   assert.deepEqual(state.storage.values.get(name), corrupted);
 });
 
-test("never-attempted proposals can be cancelled but ambiguous submissions cannot", async () => {
-  const state = setup({ apiClient: { async submit() { throw Object.assign(new Error(), { code: "API_TIMEOUT" }); } } });
+test("never-attempted proposals can be cancelled with verified shared coordination, but ambiguous submissions cannot", async () => {
+  const state = setup({ locks: lockManager(), sharedLockScope: true,
+    apiClient: { async submit() { throw Object.assign(new Error(), { code: "API_TIMEOUT" }); } } });
   await state.outbox.enqueue(payload(), metadata);
   await state.outbox.remove(id());
   assert.deepEqual(await state.outbox.list(), []);
@@ -213,7 +216,8 @@ test("concurrent tabs keep all entries and a late timeout cannot overwrite a sen
   const storage = memoryStorage();
   let finishLate;
   const slow = setup({ storage, apiClient: { submit: () => new Promise((_, reject) => { finishLate = reject; }) } });
-  const fast = setup({ storage });
+  const otherRealm = await import("../src/outbox.js?late-timeout-test");
+  const fast = setup({ storage, factory: otherRealm.createOutbox });
   await Promise.all([slow.outbox.enqueue(payload(), metadata), fast.outbox.enqueue(payload("delete", { request_id: id(2) }), metadata)]);
   const attempt = slow.outbox.send(id());
   while (!finishLate) await new Promise((resolve) => setImmediate(resolve));
@@ -312,7 +316,7 @@ test("legacy gateway rejections recover after reload and submit the identical sa
 
 test("legacy recovery leaves normal and unknown permanent rejections unchanged", async () => {
   for (const code of ["CHART_ALREADY_EXISTS", "CHART_NOT_FOUND", "SAME_AS_CURRENT", "BAD_REQUEST",
-    "API_NETWORK_ERROR", "RATE_LIMITED", "GATEWAY_UNKNOWN", "GATEWAY_AUTH_REQUIRED_EXTRA"]) {
+    "GATEWAY_UNKNOWN", "GATEWAY_AUTH_REQUIRED_EXTRA"]) {
     const state = setup();
     await state.outbox.enqueue(payload(), metadata);
     const rejected = { status: "rejected", attempts: 2, nextAttemptAt: 987_654, errorCode: code };
@@ -379,7 +383,8 @@ test("legacy recovery validates saved payload and attempt state before making a 
       await state.storage.set(entryKey, corrupted);
     }
     const beforeRead = structuredClone([...state.storage.values]);
-    await assert.rejects(state.make().flush(), { code: "OUTBOX_INVALID_DATA" });
+    assert.deepEqual(await state.make().flush(), []);
+    assert.equal((await state.make().inspect()).issues.length, 1);
     assert.equal(state.calls.length, 0);
     assert.deepEqual([...state.storage.values], beforeRead);
   }
